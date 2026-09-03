@@ -20,14 +20,18 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
 ]
 # Lower bounds only; exact versions are pinned by uv.lock. Upgrade deliberately
-# with `uv lock --upgrade` (fake-useragent and requests-ratelimiter exist to
-# avoid FamilySearch blocking — retest downloads after upgrading them).
+# with `uv lock --upgrade` (fake-useragent exists to avoid FamilySearch
+# blocking — retest downloads after upgrading it).
 dependencies = [
     "babelfish>=0.6.1",
     "diskcache>=5.6.3",
     "requests>=2.32.3",
     "fake-useragent>=2.0.3",
-    "requests-ratelimiter>=0.7.0",
+    # Deliberate exact pin: the LimiterAdapter mounted in classes/session.py
+    # enforces the FamilySearch request rate. Held at the version validated
+    # against FamilySearch; do not widen without retesting a real download
+    # (0.8+ moves to pyrate-limiter 3.x with API/behavior changes).
+    "requests-ratelimiter==0.7.0",
 ]
 dynamic = ["version", "readme"]
 
