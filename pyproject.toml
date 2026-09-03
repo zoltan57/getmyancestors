@@ -34,6 +34,9 @@ HomePage = "https://github.com/Linekio/getmyancestors"
 [tool.setuptools.package-data]
 getmyancestors = ["fstogedcom.png"]
 
+[tool.uv.workspace]
+members = ["getmyancestors"]
+
 [project.scripts]
 getmyancestors = "getmyancestors.getmyancestors:main"
 mergemyancestors = "getmyancestors.mergemyancestors:main"
