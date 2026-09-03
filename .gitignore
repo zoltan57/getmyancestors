@@ -137,6 +137,8 @@ dump.rdb
 .*
 !.gitignore
 !.readthedocs.yml
+!.github/
+!.github/**
 
 # vscode
 .vscode/

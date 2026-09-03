@@ -1,0 +1,41 @@
+name: Quality Gate
+
+# Minimal gate for what this repository can currently verify: the package
+# installs and every module byte-compiles. The project has no lint, type-check,
+# or test tooling configured yet (no ruff/mypy config, no tests/ directory) —
+# add those steps here as that tooling lands, rather than assuming it.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the commit under test
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the package
+        # Installs from pyproject.toml (which pins the same versions as
+        # requirements.txt), so this also verifies the packaging metadata
+        # and the three console-script entry points resolve.
+        run: pip install .
+
+      - name: Byte-compile all modules
+        # Catches syntax errors in modules that no entry point imports
+        # (e.g. GUI-only code paths). -q keeps output to errors only.
+        run: python -m compileall -q getmyancestors
+
+      - name: Verify entry-point imports
+        # Importing the CLI modules catches missing dependencies and
+        # import-time errors that compileall cannot. The Tkinter GUI module
+        # is excluded: importing it requires a display-capable Tk install.
+        run: |
+          python -c "import getmyancestors.getmyancestors"
+          python -c "import getmyancestors.mergemyancestors"
