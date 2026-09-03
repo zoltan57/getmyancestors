@@ -1,7 +1,11 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "getmyancestors"
 description = "Retrieve GEDCOM data from FamilySearch Tree"
-requires-python = ">=3.7"
+requires-python = ">=3.12"
 license = {text = "GNU"}
 keywords = [
   "getmyancestors",
@@ -15,27 +19,27 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3 :: Only",
 ]
+# Lower bounds only; exact versions are pinned by uv.lock. Upgrade deliberately
+# with `uv lock --upgrade` (fake-useragent and requests-ratelimiter exist to
+# avoid FamilySearch blocking — retest downloads after upgrading them).
 dependencies = [
-    "babelfish==0.6.1",
-    "diskcache==5.6.3",
-    "requests==2.32.3",
-    "fake-useragent==2.0.3",
-    "requests-ratelimiter==0.7.0"
+    "babelfish>=0.6.1",
+    "diskcache>=5.6.3",
+    "requests>=2.32.3",
+    "fake-useragent>=2.0.3",
+    "requests-ratelimiter>=0.7.0",
 ]
 dynamic = ["version", "readme"]
 
 [tool.setuptools.dynamic]
 version = {attr = "getmyancestors.__version__"}
-readme = {file = ["README.md"]}
+readme = {file = ["README.md"], content-type = "text/markdown"}
 
 [project.urls]
 HomePage = "https://github.com/Linekio/getmyancestors"
 
 [tool.setuptools.package-data]
 getmyancestors = ["fstogedcom.png"]
-
-[tool.uv.workspace]
-members = ["getmyancestors"]
 
 [project.scripts]
 getmyancestors = "getmyancestors.getmyancestors:main"

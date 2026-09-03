@@ -7,17 +7,17 @@ This program is now in production phase, but bugs might still be present. Featur
 
 The project is maintained at https://github.com/Linekio/getmyancestors. Visit here for the latest version and more information.
 
-This script requires python3 and the modules indicated in the requirements.txt file. To install the modules, run in your terminal:
+This package requires Python 3.12+. Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`.
 
 
 Installation
 ============
 
-The easiest way to install _getmyancestors_ is to use pip:
+The easiest way to install _getmyancestors_ is with [uv](https://docs.astral.sh/uv/), from the repository root:
 
-`pip install getmyancestors`
+`uv sync`
 
-Otherwise, you can download the source package and then execute in the folder:
+Or install it with pip:
 
 `pip install .`
 
