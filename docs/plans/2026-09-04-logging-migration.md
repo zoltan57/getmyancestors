@@ -53,7 +53,10 @@ else goes through `logging` to stderr.** Concretely:
 - Everything else — login progress, per-request HTTP diagnostics, retry/backoff
   notices, the two CRIT-02 "unconditional" failure warnings, and CLI argument
   errors — is a diagnostic, not a data product. All of it moves to `logging`,
-  written to stderr by default, optionally duplicated to a file with `--logfile`.
+  written to stderr by default, and — for `fetch` specifically — **always**
+  additionally written in full detail to a log file (see §2.1a), because a fetch
+  can run a long time and the operator needs a complete record if something goes
+  wrong partway through, independent of whether `-v` was passed.
 
 ## 2. Target design
 
@@ -119,12 +122,70 @@ def configure_logging(*, verbose: bool = False, logfile: str | Path | None = Non
 - If `logfile` is given, also attaches a `logging.FileHandler(logfile, encoding=
   "utf-8")` **always at `DEBUG` level, regardless of `verbose`** — this matches the
   old `Session.logfile` behavior exactly (the file got every `write_log` line
-  whether or not `verbose` was set; only the console output was gated).
+  whether or not `verbose` was set; only the console output was gated). Whether
+  `fetch` ever calls this with `logfile=None` in practice is covered in §2.1a —
+  spoiler: essentially never, because `fetch` always computes a real path before
+  calling `configure_logging()`.
 - Does not call `logging.basicConfig()` anywhere, and does not set
   `logger.propagate = False` (leave default `True` — this is what lets pytest's
   `caplog` fixture, which attaches its own handler higher up the hierarchy, still
   see every record regardless of what `configure_logging()` did or didn't set up in
   a given test).
+
+### 2.1a Full-fetch logging is always on by default (no flag required)
+
+A `fetch` run can take a long time, and if something goes wrong partway through,
+the operator needs a complete record of every request/response — regardless of
+whether `-v` was passed on the console that day. So `fetch` **always** writes a
+full `DEBUG`-level log file; there is no way to fully disable it, matching the
+plan's explicit product requirement (this is a deliberate exception to "everything
+is opt-in" — the person who requested this plan considers the lengthy log files a
+worthwhile, expected cost of a long-running fetch, not something to make people
+remember to opt into).
+
+- Add a new public helper to `getmyancestors/logging_config.py`:
+
+  ```python
+  def default_logfile_path(db_path: str | Path) -> Path:
+      """Return the auto-generated log file path for a fetch against ``db_path``.
+
+      One file per invocation, named after the database file plus a
+      filesystem-safe UTC timestamp, in the same directory as the database —
+      e.g. ``family.sqlite`` -> ``family.sqlite.20260904T170300Z.log``. Colons
+      are avoided (invalid in Windows filenames), unlike the ISO-8601 timestamps
+      stored inside the database itself (see ``db.py``'s ``_utc_now_iso``).
+      """
+  ```
+
+  Implementation: `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")` for the
+  timestamp; `Path(db_path).with_name(Path(db_path).name + f".{timestamp}.log")`
+  for the path. This lives in `logging_config.py`, not `cli.py`, because it's
+  purely a logging-configuration concern and keeps `cli.py` focused on argument
+  parsing/dispatch.
+- In `cli.py`'s `main()`, **immediately after `args = parser.parse_args(argv)`**
+  and **before** the `configure_logging(...)` call described in §2.4: if
+  `args.command == "fetch"` and `not getattr(args, "logfile", None)` and
+  `getattr(args, "db", None)` is truthy, set `args.logfile = default_logfile_path
+  (args.db)`. Guard on `args.db` being truthy because `--db` might still be
+  missing at this point (it's validated by `_validate_required` right after) — if
+  it's missing there's no path to derive a default from, so just leave
+  `args.logfile` as `None` and let the normal "--db is required" error fire; don't
+  try to compute a default in that case.
+- Right after `configure_logging(...)` runs for the `fetch` command specifically
+  (i.e. inside the `if args.command == "fetch":` branch, using the module-level
+  `logger` in `cli.py`), log `logger.warning(f"Writing full fetch log to
+  {args.logfile}")`. Use `WARNING` — not because this is actually a warning, but
+  because `WARNING` is the default-visible level (§2.1), so the operator is always
+  told where the log went even without `-v`. This mirrors the same
+  always-visible-by-default reasoning already used for the CRIT-02 messages
+  in `session.py`/`fetch.py`.
+- `--logfile PATH` on the `fetch` subparser (§2.4) becomes an **override** of the
+  auto-computed default, not a way to opt into logging that's otherwise off.
+  Update its help text accordingly (§2.4 below has the exact wording).
+- This only applies to `fetch`. `load`/`diff` still pass `logfile=None` to
+  `configure_logging()` unconditionally (unchanged from the original design) —
+  they don't do anything long-running or request-heavy enough to warrant an
+  always-on log file, and neither has a `--logfile` flag (see §0/§2.4).
 
 ### 2.2 `session.py`
 
@@ -189,20 +250,27 @@ def configure_logging(*, verbose: bool = False, logfile: str | Path | None = Non
 ### 2.4 `cli.py`
 
 - Add `import logging` and `from getmyancestors.logging_config import
-  configure_logging`.
-- In `main()`, call `configure_logging(verbose=getattr(args, "verbose", False),
-  logfile=getattr(args, "logfile", None))` **immediately after `args = parser.
-  parse_args(argv)`**, before `_validate_required(args)` — so that even the
-  "missing required argument" error path is subject to the user's `-v`/`--logfile`
-  choice (if the `fetch` subcommand — the only one that has these two flags, see
-  next bullet — supplied them; `load`/`diff` always get the default `verbose=False,
-  logfile=None`, i.e. plain stderr-only `WARNING`-level output, since neither
-  subcommand has these flags).
+  configure_logging, default_logfile_path`.
+- In `main()`, **immediately after `args = parser.parse_args(argv)`** and
+  **before** `_validate_required(args)`:
+  1. If `args.command == "fetch"` and `not getattr(args, "logfile", None)` and
+     `getattr(args, "db", None)`: set `args.logfile = default_logfile_path(args.
+     db)` (§2.1a's always-on default).
+  2. Call `configure_logging(verbose=getattr(args, "verbose", False), logfile=
+     getattr(args, "logfile", None))` — so that even the "missing required
+     argument" error path is subject to the user's `-v`/`--logfile` choice.
+     `load`/`diff` always get `verbose=False, logfile=None` (plain stderr-only
+     `WARNING`-level output), since neither subcommand has these flags.
+  3. If `args.command == "fetch"` and `args.logfile` is set (it always will be by
+     this point unless `--db` was missing, per step 1's guard), log `logger.
+     warning(f"Writing full fetch log to {args.logfile}")` so the operator always
+     sees where the log went, even without `-v` (§2.1a).
 - Add `--logfile PATH` to the `fetch` subparser only (matching where `-v` already
-  lives), with `help="also write every log message to this file, in addition to
-  the console (regardless of -v/--verbose)"`. Do not add `--logfile` to `load`/
-  `diff` — they don't do anything that benefits from it today (see §0), and adding
-  an unused flag would be scope creep.
+  lives), with `help="write the full debug-level log to this file instead of the
+  automatic default (a timestamped file next to --db); a log file is always
+  written for fetch, regardless of -v/--verbose"`. Do not add `--logfile` to
+  `load`/`diff` — they don't do anything that benefits from it today (see §0),
+  and adding an unused flag would be scope creep.
 - Convert every remaining `print(..., file=sys.stderr)` call to a `logger.error
   (...)` call using a module-level `logger = logging.getLogger(__name__)`:
   - The `_validate_required` failure message (`f"error: {error}"` — drop the
@@ -287,38 +355,94 @@ def configure_logging(*, verbose: bool = False, logfile: str | Path | None = Non
     `failed_requests`) now also appears in `caplog.records` at `WARNING` level,
     even with no `caplog.set_level` call — proving the CRIT-02 always-visible
     requirement survived the migration.
+- **New file `tests/test_logging_config.py`:** test `logging_config.py` directly
+  and in isolation — no `cli.py`/`session.py`/`fetch.py`/network involved at all,
+  which sidesteps the question of how to observe `-v`'s effect without performing
+  a real login (`Session.__init__` always calls `self.login()`, so constructing a
+  real `Session` in a test is never appropriate — see the existing `session_factory`
+  fixture's `Session.__new__` bypass pattern in `conftest.py` for why, and don't
+  invent a new workaround here when direct testing of `configure_logging()` avoids
+  the problem entirely):
+  - `configure_logging(verbose=True, logfile=None)` then `logging.getLogger
+    ("getmyancestors.somefakemodule").debug("x")` — message appears in `capsys.
+    readouterr().err`. Repeat with `verbose=False` — message does **not** appear
+    (but a `.warning("y")` call still does, proving the default `WARNING`
+    threshold, not full silence).
+  - `configure_logging(verbose=False, logfile=tmp_path / "x.log")` then a
+    `.debug(...)` call from a child logger — the message appears in the log
+    **file** even though it did not appear on the console (proves "file always
+    gets `DEBUG`, regardless of `verbose`").
+  - Calling `configure_logging()` twice in a row and logging one message after
+    each call — the message is not duplicated (proves the old-handler-removal
+    behavior from §2.1, independent of any CLI dispatch).
+  - `default_logfile_path("family.sqlite")` returns a path in the same directory
+    as `family.sqlite` (use a `tmp_path`-rooted input), whose filename starts with
+    `family.sqlite.` and ends with `.log` — don't assert exact timestamp equality
+    across repeated calls, only the prefix/suffix pattern, since real-clock timing
+    could tick the timestamp between two calls in a fast test run.
 - **`tests/test_fetch.py`:** add one test asserting the "Captured data is
   incomplete..." message appears in `caplog.records` at `WARNING` level (default
   capture level, no `set_level` needed) when `run_fetch` returns 3, alongside the
   existing assertions on `requests_failed`/`api_response` rows.
 - **`tests/test_cli.py`:** the three existing tests asserting on `capsys.
   readouterr().err` (`"FS_DB"`, `"FS_USERNAME"`, `"FS_RATE_LIMIT"` — see §2.4's
-  `_validate_required`/`EnvConfigError` handling) must keep passing with no
-  changes to their assertions, proving the `print` → `logger.error` conversion
-  preserved visible behavior. Add new tests:
-  - `-v`/`--verbose` on `fetch` causes a `DEBUG`-level message to reach `capsys`'s
-    stderr capture when a fake `Session.get_url` is exercised (reuse
-    `FakeSession`/fixtures from `test_fetch.py` if convenient, or a minimal stand-
-    in) — proving `configure_logging()` is actually wired to `-v`.
-  - `--logfile PATH` on `fetch` results in the log file existing and containing at
-    least one line after a `run_fetch` call, using a real `tmp_path` file.
-  - Calling `cli.main([...])` twice in the same test does **not** duplicate log
-    lines (assert `capsys.readouterr().err.count(...)` is 1, not 2) — this is the
-    handler-accumulation regression test for §2.1's "must remove old handlers
-    first" requirement.
+  `_validate_required`/`EnvConfigError` handling) must keep passing with **no
+  changes to their assertions**. One of them, however, needs an argument change
+  to avoid a real side effect introduced by §2.1a:
+  `test_missing_username_for_fetch_without_env_returns_exit_code_2` currently
+  calls `cli.main(["fetch", "--db", "somewhere.sqlite"])` — a bare relative path.
+  Once §2.1a lands, this exact call will create a real `somewhere.sqlite.
+  <timestamp>.log` file in whatever directory the test process's cwd happens to
+  be (i.e. it leaks a file into the repo working directory on every test run,
+  since the default-logfile computation and the file handler's creation both
+  happen before `_validate_required` fails). Add a `tmp_path: Path` parameter to
+  that test function and change the argument to `str(tmp_path /
+  "somewhere.sqlite")` so the stray file lands in pytest's managed temp directory
+  instead. (The other two existing tests —
+  `test_missing_db_without_env_returns_exit_code_2` and
+  `test_invalid_int_env_var_returns_exit_code_2` — use the `load` subcommand, not
+  `fetch`, so §2.1a's default-logfile logic never runs for them; they need no
+  changes at all.) Add new tests — all of these can and should use the
+  **existing `test_missing_username_for_fetch_without_env_returns_exit_code_2`-
+  style invocation** (`cli.main(["fetch", "--db", str(tmp_path / "family.
+  sqlite")])`, deliberately omitting `-u`/`FS_USERNAME` so it fails
+  `_validate_required` at exit code 2) as their base case, since §2.4 places the
+  default-logfile computation, the `configure_logging()` call, and the "Writing
+  full fetch log to ..." warning **before** `_validate_required` runs — meaning
+  all three fire even on this validation-failure path, without ever constructing
+  a `Session` or touching the network:
+  - **`fetch` with no `--logfile` still creates a log file** (§2.1a, the most
+    important new test in this plan — it directly verifies the "regardless of
+    `-v`" always-on logging requirement that motivated this whole change): after
+    the `cli.main([...])` call above, assert exactly one file matching
+    `family.sqlite.*.log` exists next to the given `--db` path, and that it's
+    non-empty (it contains at least the "Writing full fetch log to ..." line).
+  - `--logfile custom.log` explicitly given on the same invocation: assert
+    `custom.log` was written to (not an auto-generated `family.sqlite.*.log`),
+    and that no `family.sqlite.*.log` file exists — proves the override in
+    §2.1a's `not getattr(args, "logfile", None)` guard works.
+  - Handler-accumulation regression test: call `cli.main([...])` once, call
+    `capsys.readouterr()` to clear the buffer, call `cli.main([...])` a second
+    time with the same arguments, then assert the **second** call's own captured
+    stderr contains the "FS_USERNAME" error message exactly once — proving no
+    handler leaked over from the first call and caused it to double up.
 
 ## 4. Documentation updates
 
 - `README.md`: add a short "Logging" section (after "Configuration (.env)", before
   "Commands" — or wherever reads best once written) explaining: default behavior
-  (warnings only, to stderr), `-v`/`--verbose` (also logs every HTTP request at
-  debug detail), `--logfile PATH` (additionally writes everything, regardless of
-  `-v`, to the given file — handy for an unattended fetch you want to review
-  later). Update the existing `fetch` flags table's `-v` row if its wording no
-  longer matches (it currently says "print each HTTP request to stderr as it
-  happens" — still accurate, but consider adding a one-line mention that it's now
-  backed by Python's `logging` module at `DEBUG` level, for anyone grepping the
-  README for that fact). Add a `--logfile` row to the same table.
+  (warnings only, to stderr); `-v`/`--verbose` (also logs every HTTP request at
+  debug detail, to the console); and that **`fetch` always writes a complete
+  debug-level log file, regardless of `-v`** — auto-named next to `--db` with a
+  timestamp (e.g. `family.sqlite.20260904T170300Z.log`) unless `--logfile PATH` is
+  given to pick a different location — because a fetch can run a long time and a
+  full record is worth having if anything goes wrong partway through. Update the
+  existing `fetch` flags table's `-v` row if its wording no longer matches (it
+  currently says "print each HTTP request to stderr as it happens" — still
+  accurate, but consider adding a one-line mention that it's now backed by
+  Python's `logging` module at `DEBUG` level, for anyone grepping the README for
+  that fact). Add a `--logfile` row to the same table describing the auto-default
+  and the override.
 - `getmyancestors fetch --help` output changes automatically once the new argparse
   argument is added (§2.4) — no separate action needed, but do sanity-check the
   rendered help text reads sensibly during Phase 2's acceptance check.
@@ -333,21 +457,26 @@ pytest -q` passes, then one commit.
 
 ### Phase 1 — `logging_config.py` + `session.py` + `fetch.py`
 
-- Add `getmyancestors/logging_config.py` per §2.1.
+- Add `getmyancestors/logging_config.py` per §2.1, including the
+  `default_logfile_path()` helper per §2.1a (even though nothing calls it until
+  Phase 2 wires it into `cli.py` — it's simplest to write and unit-test it
+  alongside the rest of the new module now).
 - Migrate `session.py` per §2.2 (drop `verbose`/`logfile` ctor params and
   `write_log`; add module logger; convert every call site).
 - Migrate `fetch.py`'s one `sys.stderr.write` per §2.3.
 - Update `tests/conftest.py`'s `session_factory` fixture per §3 (delete the two
   now-invalid attribute-assignment lines) and add the autouse logger-reset fixture
   per §3.
-- Add the new `test_session.py`/`test_fetch.py` tests per §3. Do **not** touch
-  `cli.py` yet — `Session(...)` in `cli.py` still passes `verbose=args.verbose` at
-  the end of this phase, which will now fail (`Session.__init__` no longer accepts
-  it). That's expected and is fixed in Phase 2 — to keep Phase 1 shippable on its
-  own despite this, temporarily change that one call site to stop passing
-  `verbose=args.verbose` (just delete the keyword argument) as part of Phase 1,
-  even though the rest of `cli.py`'s logging migration (§2.4) waits for Phase 2.
-  This keeps `uv run pytest -q` green at the end of Phase 1 without pulling all of
+- Add the new `test_logging_config.py`/`test_session.py`/`test_fetch.py` tests
+  per §3. Do **not** touch `cli.py` yet — `Session(...)` in `cli.py` still passes
+  `verbose=args.verbose` at the end of this phase, which will now fail
+  (`Session.__init__` no longer accepts it). That's expected and is fixed in
+  Phase 2 — to keep Phase 1 shippable on its own despite this, temporarily change
+  that one call site to stop passing `verbose=args.verbose` (just delete the
+  keyword argument) as part of Phase 1, even though the rest of `cli.py`'s
+  logging migration (§2.4, including the always-on default log file per §2.1a)
+  waits for Phase 2. This keeps `uv run pytest -q` green at the end of Phase 1
+  without pulling all of
   Phase 2's scope forward.
 - **Acceptance:** all four end-of-phase checks in the paragraph above pass; `grep
   -n "write_log\|self.verbose\|self.logfile" getmyancestors/session.py` returns
@@ -357,25 +486,42 @@ pytest -q` passes, then one commit.
 ### Phase 2 — Wire `-v`/`--logfile` through `cli.py`
 
 - Apply all of §2.4's remaining changes (the `Session(...)` keyword-argument
-  removal was already done in Phase 1; everything else — `--logfile` argparse
-  argument, the `configure_logging()` call in `main()`, and the `print` → `logger.
-  error` conversions — happens now).
-- Add the new `test_cli.py` tests per §3.
+  removal was already done in Phase 1; everything else — the always-on default
+  log file per §2.1a, the `--logfile` argparse argument, the `configure_logging()`
+  call in `main()`, and the `print` → `logger.error` conversions — happens now).
+- Add the new `test_cli.py` tests per §3, including the required argument fix to
+  `test_missing_username_for_fetch_without_env_returns_exit_code_2` (add
+  `tmp_path`, stop using a bare relative `--db` path — see §3).
 - Apply the README changes per §4.
 - **Acceptance:** all four end-of-phase checks pass; `getmyancestors fetch --help`
   shows both `-v`/`--verbose` and `--logfile`; `grep -rn "print(.*file=sys.stderr"
-  getmyancestors/cli.py` returns nothing; a manual sanity check (not a unit test,
-  run from a scratch temp directory since it creates a SQLite file as a side
-  effect) that `python -c "from getmyancestors.cli import main; main(['load',
-  '--db', 'nonexistent.sqlite'])"` prints a `logging`-formatted error line
-  (`[...] ERROR getmyancestors.cli: ...`) to stderr, not a bare message — confirms
-  the formatter from §2.1 is actually active end-to-end.
+  getmyancestors/cli.py` returns nothing; from a scratch temp directory, running
+  `getmyancestors fetch --db family.sqlite` (deliberately **omitting** `-u` so it
+  fails argument validation before ever constructing a `Session` — this must not
+  make a live network call, consistent with §0's "never call the live API" rule
+  even for a manual acceptance check) exits 2 for the missing username, **and**
+  still leaves behind a `family.sqlite.<timestamp>.log` file in that directory
+  containing at least the "Writing full fetch log to ..." line — confirming the
+  always-on log file (§2.1a) fires before argument validation, on a real CLI
+  invocation and not just in unit tests. Separately, a manual sanity check (not
+  a unit test, run from a scratch temp directory since it creates a SQLite file
+  as a side effect) that `python -c "from getmyancestors.cli import main;
+  main(['load', '--db', 'nonexistent.sqlite'])"` prints a `logging`-formatted
+  error line (`[...] ERROR getmyancestors.cli: ...`) to stderr, not a bare
+  message — confirms the formatter from §2.1 is active for `load` too (which
+  gets no log file, per §2.1a's fetch-only scope, only the console handler).
 - Commit: `Phase 2: wire -v/--logfile through cli.py via logging_config`
 
 ## 6. Manual verification (human operator, after Phase 2)
 
-Not for the implementing model. Run a small real fetch with `-v --logfile run.log`,
-confirm the console shows per-request detail and `run.log` contains the same lines
+Not for the implementing model — this is the only step in this whole plan that
+calls the live FamilySearch API, and only a human operator with real credentials
+should run it. Run a small real fetch with no `--logfile` at all and confirm a
+`<db>.<timestamp>.log` file appears next to the database afterward containing
+full per-request detail, even though the console (without `-v`) stayed quiet.
+Then run one with `-v` and confirm the console now shows the same level of
+detail the log file always has. Then run one with an explicit `--logfile
+custom.log` and confirm only that file is written, not an auto-named one.
 (plus anything below the console's configured threshold, if `-v` was omitted —
 not applicable here since `-v` was passed, but worth remembering that `--logfile`
 alone, without `-v`, should still capture debug-level detail to the file while the
