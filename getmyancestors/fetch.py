@@ -10,6 +10,10 @@ from typing import Any
 
 from getmyancestors.db import finish_run, start_run, store_response
 
+# FamilySearch's own current API reference documents this exact cap for
+# GET /platform/tree/persons?pids=... ("no more than 200 person ids") -- not
+# an arbitrary/tunable value. See docs/decisions/2026-09-04-familysearch-api-limits.md
+# (SS2) for the verified source and why this shouldn't be raised.
 MAX_PERSONS = 200
 logger = logging.getLogger(__name__)
 
@@ -84,7 +88,14 @@ def _collect_relationships(
 
 
 def run_fetch(conn: Any, session: Any, opts: Any) -> int:
-    """Run a fetch session and store all raw request results in SQLite."""
+    """Run a fetch session and store all raw request results in SQLite.
+
+    Captures a deliberately small, chosen subset of the FamilySearch Platform
+    API: current_user, persons_batch, couple, couple_notes, person_sources,
+    person_notes, memory. FamilySearch documents a far larger API surface (see
+    docs/decisions/2026-09-04-familysearch-api-limits.md SS3 for what's known and
+    how to find more) -- this is a scope choice, not an API limitation.
+    """
     argv = list(getattr(opts, "argv", ["getmyancestors", "fetch"]))
     run_id = start_run(conn, _redact_argv(argv))
     requests_total = 0

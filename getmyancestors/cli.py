@@ -115,11 +115,16 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_parser.add_argument(
         "--no-memories", action="store_true", help="skip fetching linked memories (fetched by default)"
     )
+    # No numeric rate limit is published by FamilySearch; 2/sec is a conservative
+    # self-imposed default, not a documented safe value -- get_url() also honors
+    # a 429 response's Retry-After header regardless of this setting. See
+    # docs/decisions/2026-09-04-familysearch-api-limits.md (SS1).
     fetch_parser.add_argument(
         "--rate-limit",
         type=int,
         default=_env_int("FS_RATE_LIMIT", 2),
-        help="maximum FamilySearch API requests per second; "
+        help="maximum FamilySearch API requests per second (a conservative default, "
+        "not a documented FamilySearch limit -- see docs/decisions/2026-09-04-familysearch-api-limits.md); "
         "falls back to the FS_RATE_LIMIT environment variable (default: 2)",
     )
     fetch_parser.add_argument(

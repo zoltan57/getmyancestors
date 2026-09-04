@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from typing import Any
 
 import pytest
 import requests
 
-from getmyancestors.session import Session
+from getmyancestors.session import Session, _parse_retry_after
 
 
 class DummyResponse:
@@ -19,12 +21,14 @@ class DummyResponse:
         json_data: dict[str, Any] | None = None,
         url: str = "https://api.familysearch.org/platform/tree/persons?pids=AAAA-001",
         json_error: Exception | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.status_code = status_code
         self.text = text
         self._json_data = json_data
         self.url = url
         self._json_error = json_error
+        self.headers = headers or {}
 
     def json(self) -> dict[str, Any]:
         if self._json_error is not None:
@@ -34,6 +38,18 @@ class DummyResponse:
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise requests.exceptions.HTTPError(f"HTTP {self.status_code}")
+
+
+def test_parse_retry_after_handles_seconds_date_and_missing() -> None:
+    assert _parse_retry_after(None) is None
+    assert _parse_retry_after("") is None
+    assert _parse_retry_after("not-a-valid-value") is None
+    assert _parse_retry_after("5") == 5.0
+
+    future = datetime.now(UTC) + timedelta(seconds=10)
+    parsed = _parse_retry_after(format_datetime(future, usegmt=True))
+    assert parsed is not None
+    assert 8.0 <= parsed <= 10.5  # small tolerance for test execution time
 
 
 def test_login_passes_timeout_on_all_http_calls(
@@ -144,6 +160,76 @@ def test_get_url_403_non_json_body_does_not_raise(
     assert raw_text is None
     assert status == 403
     assert session.failed_requests == 1
+
+
+def test_get_url_429_honors_retry_after_seconds(
+    session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FamilySearch's throttling docs specify 429 + Retry-After as the sanctioned
+    backoff mechanism (no numeric rate limit is published) -- verify get_url()
+    sleeps for exactly the value in the header rather than guessing.
+    """
+    session = session_factory()
+    responses = iter(
+        [
+            DummyResponse(status_code=429, text="", headers={"Retry-After": "7"}),
+            DummyResponse(status_code=200, text='{"ok": true}', json_data={"ok": True}),
+        ]
+    )
+    sleep_calls: list[float] = []
+
+    monkeypatch.setattr(session, "get", lambda *args, **kwargs: next(responses))
+    monkeypatch.setattr("getmyancestors.session.time.sleep", sleep_calls.append)
+
+    data, raw_text, status = session.get_url("/platform/tree/persons/AAAA-001")
+
+    assert sleep_calls == [7.0]
+    assert data == {"ok": True}
+    assert raw_text == '{"ok": true}'
+    assert status == 200
+
+
+def test_get_url_429_without_retry_after_falls_back_to_backoff(
+    session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = session_factory()
+    responses = iter(
+        [
+            DummyResponse(status_code=429, text=""),
+            DummyResponse(status_code=200, text='{"ok": true}', json_data={"ok": True}),
+        ]
+    )
+    sleep_calls: list[float] = []
+
+    monkeypatch.setattr(session, "get", lambda *args, **kwargs: next(responses))
+    monkeypatch.setattr("getmyancestors.session.time.sleep", sleep_calls.append)
+
+    data, raw_text, status = session.get_url("/platform/tree/persons/AAAA-001")
+
+    # attempt 0 -> min(2**0, 60) == 1
+    assert sleep_calls == [1]
+    assert (data, raw_text, status) == ({"ok": True}, '{"ok": true}', 200)
+
+
+def test_get_url_429_retry_after_is_capped(
+    session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreasonably large Retry-After must not stall a single request forever."""
+    session = session_factory()
+    responses = iter(
+        [
+            DummyResponse(status_code=429, text="", headers={"Retry-After": "999999"}),
+            DummyResponse(status_code=200, text='{"ok": true}', json_data={"ok": True}),
+        ]
+    )
+    sleep_calls: list[float] = []
+
+    monkeypatch.setattr(session, "get", lambda *args, **kwargs: next(responses))
+    monkeypatch.setattr("getmyancestors.session.time.sleep", sleep_calls.append)
+
+    session.get_url("/platform/tree/persons/AAAA-001")
+
+    assert sleep_calls == [300.0]
 
 
 def test_get_url_401_triggers_one_relogin_then_retry(

@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import time
 import webbrowser
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -19,7 +21,35 @@ from requests_ratelimiter import LimiterAdapter
 
 DEFAULT_CLIENT_ID = "a02j000000KTRjpAAH"
 DEFAULT_REDIRECT_URI = "https://misbach.github.io/fs-auth/index_raw.html"
+# Cap for a single Retry-After wait: FamilySearch's throttling is a shared,
+# per-user processing-time budget with no published numeric quota (see
+# https://developers.familysearch.org/main/docs/throttling) -- Retry-After is
+# the sanctioned mechanism for backing off, but an unreasonably large value
+# (bad server response, clock skew) shouldn't stall a single request forever.
+MAX_RETRY_AFTER_SECONDS = 300.0
 logger = logging.getLogger(__name__)
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse a Retry-After header value into seconds to wait, or None if absent/invalid.
+
+    Per RFC 9110 SS10.2.3, Retry-After is either an integer number of seconds
+    or an HTTP-date. FamilySearch's throttling docs specify a 429 response
+    always carries this header; this returns None only when it's missing or
+    unparseable, so the caller can fall back to exponential backoff.
+    """
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return float(value)
+    try:
+        retry_at = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=UTC)
+    return max((retry_at - datetime.now(UTC)).total_seconds(), 0.0)
 
 
 class Session(requests.Session):
@@ -207,6 +237,21 @@ class Session(requests.Session):
                 continue
             if response.status_code == 401:
                 self.login(refresh_only=True)
+                continue
+            if response.status_code == 429:
+                # Sanctioned mechanism per FamilySearch's throttling docs
+                # (https://developers.familysearch.org/main/docs/throttling):
+                # honor Retry-After rather than guessing at a request rate --
+                # the throttle is a shared per-user processing-time budget
+                # with no published numeric quota, so this is the only
+                # documented way to know how long to wait.
+                wait = _parse_retry_after(response.headers.get("Retry-After"))
+                if wait is None:
+                    wait = min(2**attempt, 60)
+                else:
+                    wait = min(wait, MAX_RETRY_AFTER_SECONDS)
+                logger.warning(f"Rate limited (429) for {url}; waiting {wait:.0f}s before retry")
+                time.sleep(wait)
                 continue
 
             try:
