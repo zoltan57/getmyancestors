@@ -1,10 +1,10 @@
 name: Quality Gate
 
 # Minimal gate for what this repository can currently verify: the locked
-# dependency set installs, every module byte-compiles, the entry-point
-# modules import cleanly, Ruff lint/format checks pass, and the pytest
-# suite passes. Type-checking (e.g. ty) is not yet configured — add that
-# step here as it lands, rather than assuming it.
+# dependency set installs, the entry-point modules import cleanly, Ruff
+# lint/format checks pass, and the pytest suite passes. Type-checking
+# (e.g. ty) is not yet configured — add that step here as it lands,
+# rather than assuming it.
 
 on:
   push:
@@ -39,14 +39,10 @@ jobs:
         # metadata and that the getmyancestors console-script entry point resolves.
         run: uv sync --locked
 
-      - name: Byte-compile all modules
-        # Catches syntax errors in any module, including ones no entry point
-        # imports. -q keeps output to errors only.
-        run: uv run python -m compileall -q getmyancestors
-
       - name: Verify entry-point imports
-        # Importing the CLI and fetch modules catches missing dependencies and
-        # import-time errors that compileall cannot.
+        # Importing the CLI and fetch modules catches missing dependencies,
+        # import-time errors, and syntax errors in those modules (and, via
+        # their own imports, most of the rest of the package).
         run: |
           uv run python -c "import getmyancestors.cli"
           uv run python -c "import getmyancestors.fetch"

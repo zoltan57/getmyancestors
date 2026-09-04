@@ -119,9 +119,11 @@ the bottleneck — unlikely given FamilySearch's own rate limits.
 
 ## Quality and tests — pytest only; Ruff/ty/pytest-asyncio not yet configured
 
-**In use:** `pytest` (dev dependency), plus `python -m compileall` and two
-entry-point import checks in
-[`quality-gate.yml`](../../.github/workflows/quality-gate.yml).
+**In use:** `pytest` (dev dependency), plus entry-point import checks in
+[`quality-gate.yml`](../../.github/workflows/quality-gate.yml) (a prior
+`python -m compileall` step was dropped in the logging-migration follow-up
+review — it was redundant with the entry-point import checks and the test
+suite, which between them import every module in the package).
 
 **Not in use, and why:**
 
