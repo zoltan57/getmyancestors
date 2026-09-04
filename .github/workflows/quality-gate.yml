@@ -1,10 +1,10 @@
 name: Quality Gate
 
 # Minimal gate for what this repository can currently verify: the locked
-# dependency set installs and every module byte-compiles. The project has no
-# lint, type-check, or test tooling configured yet (no ruff/mypy config, no
-# tests/ directory) — add those steps here as that tooling lands, rather than
-# assuming it.
+# dependency set installs, every module byte-compiles, the entry-point
+# modules import cleanly, and the pytest suite passes. The project has no
+# lint or type-check tooling configured yet (no ruff/mypy config) — add
+# those steps here as that tooling lands, rather than assuming it.
 
 on:
   push:
@@ -26,18 +26,17 @@ jobs:
         # --locked fails if uv.lock has drifted from pyproject.toml, so a stale
         # lockfile is caught here rather than producing an untested dependency
         # set. Installs the package editable, which also verifies the packaging
-        # metadata and that the three console-script entry points resolve.
+        # metadata and that the getmyancestors console-script entry point resolves.
         run: uv sync --locked
 
       - name: Byte-compile all modules
-        # Catches syntax errors in modules that no entry point imports
-        # (e.g. GUI-only code paths). -q keeps output to errors only.
+        # Catches syntax errors in any module, including ones no entry point
+        # imports. -q keeps output to errors only.
         run: uv run python -m compileall -q getmyancestors
 
       - name: Verify entry-point imports
-        # Importing the CLI modules catches missing dependencies and
-        # import-time errors that compileall cannot. The Tkinter GUI module
-        # is excluded: importing it requires a display-capable Tk install.
+        # Importing the CLI and fetch modules catches missing dependencies and
+        # import-time errors that compileall cannot.
         run: |
           uv run python -c "import getmyancestors.cli"
           uv run python -c "import getmyancestors.fetch"

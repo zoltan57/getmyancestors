@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "getmyancestors"
-description = "Retrieve GEDCOM data from FamilySearch Tree"
+description = "Capture raw FamilySearch Tree API responses into SQLite and load them into relational tables"
 requires-python = ">=3.12"
 license = {text = "GNU"}
 keywords = [
   "getmyancestors",
   "familysearch",
-  "fstogedcom",
-  "gedcom",
+  "genealogy",
+  "sqlite",
 ]
 classifiers = [
     "Environment :: Console",
@@ -25,7 +25,7 @@ classifiers = [
 dependencies = [
     "requests>=2.32.3",
     "fake-useragent>=2.0.3",
-    # Deliberate exact pin: the LimiterAdapter mounted in classes/session.py
+    # Deliberate exact pin: the LimiterAdapter mounted in getmyancestors/session.py
     # enforces the FamilySearch request rate. Held at the version validated
     # against FamilySearch; do not widen without retesting a real download
     # (0.8+ moves to pyrate-limiter 3.x with API/behavior changes).
