@@ -1,12 +1,20 @@
-# global imports
+"""FamilySearch HTTP session and OAuth login workflow.
+
+The login flow performs four HTTP requests to establish authentication and then
+loads current-user metadata. Data requests are made against the FamilySearch
+API host with bounded retries and explicit timeout handling.
+"""
+
+from __future__ import annotations
+
 import sys
 import time
-from urllib.parse import urlparse, parse_qs
 import webbrowser
+from typing import Any, TextIO
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from fake_useragent import UserAgent
-
 from requests_ratelimiter import LimiterAdapter
 
 DEFAULT_CLIENT_ID = "a02j000000KTRjpAAH"
@@ -14,25 +22,20 @@ DEFAULT_REDIRECT_URI = "https://misbach.github.io/fs-auth/index_raw.html"
 
 
 class Session(requests.Session):
-    """Create a FamilySearch session
-    :param username and password: valid FamilySearch credentials
-    :param verbose: True to active verbose mode
-    :param logfile: a file object or similar
-    :param timeout: time before retry a request
-    """
+    """FamilySearch session with login and JSON request helpers."""
 
     def __init__(
         self,
-        username,
-        password,
-        client_id=None,
-        redirect_uri=None,
-        verbose=False,
-        logfile=False,
-        timeout=60,
-        rate_limit=None,
-        delay=0.1,
-    ):
+        username: str,
+        password: str,
+        client_id: str | None = None,
+        redirect_uri: str | None = None,
+        verbose: bool = False,
+        logfile: TextIO | None = None,
+        timeout: int = 60,
+        rate_limit: int = 2,
+    ) -> None:
+        """Initialize the session and attempt login immediately."""
         super().__init__()
         self.username = username
         self.password = password
@@ -41,41 +44,41 @@ class Session(requests.Session):
         self.verbose = verbose
         self.logfile = logfile
         self.timeout = timeout
-        self.delay = delay
-        self.fid = self.lang = self.display_name = None
+        self.fid: str | None = None
+        self.lang: str | None = None
+        self.display_name: str | None = None
         self.counter = 0
+        self.failed_requests: int = 0
         self.headers = {"User-Agent": UserAgent().firefox}
 
-        # Apply a rate-limit (max # requests per second) to all endpoints
-        if rate_limit:
-            adapter = LimiterAdapter(per_second=rate_limit)
-            self.mount('http://', adapter)
-            self.mount('https://', adapter)
+        adapter = LimiterAdapter(per_second=rate_limit)
+        self.mount("http://", adapter)
+        self.mount("https://", adapter)
 
         self.login()
 
     @property
-    def logged(self):
+    def logged(self) -> bool:
+        """Return whether the session cookie indicates a logged-in user."""
         return bool(self.cookies.get("fssessionid"))
 
-    def write_log(self, text):
-        """write text in the log file"""
-        log = "[%s]: %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), text)
+    def write_log(self, text: str) -> None:
+        """Write one log line to stderr and optional logfile."""
+        log = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]: {text}\n"
         if self.verbose:
             sys.stderr.write(log)
         if self.logfile:
             self.logfile.write(log)
 
-    def login(self):
-        """retrieve FamilySearch session ID
-        (https://familysearch.org/developers/docs/guides/oauth2)
-        """
+    def login(self) -> None:
+        """Run the FamilySearch OAuth login sequence."""
         for attempt in range(5):
             try:
                 url = "https://www.familysearch.org/auth/familysearch/login"
                 self.write_log("Downloading: " + url)
-                self.get(url, headers=self.headers)
+                self.get(url, headers=self.headers, timeout=self.timeout)
                 xsrf = self.cookies["XSRF-TOKEN"]
+
                 url = "https://ident.familysearch.org/login"
                 self.write_log("Logging in: " + url)
                 res = self.post(
@@ -86,10 +89,11 @@ class Session(requests.Session):
                         "password": self.password,
                     },
                     headers=self.headers,
+                    timeout=self.timeout,
                 )
                 res.raise_for_status()
 
-                url = f"https://ident.familysearch.org/cis-web/oauth2/v3/authorization"
+                url = "https://ident.familysearch.org/cis-web/oauth2/v3/authorization"
                 params = {
                     "response_type": "code",
                     "scope": "openid profile email qualifies_for_affiliate_account country",
@@ -98,16 +102,20 @@ class Session(requests.Session):
                     "username": self.username,
                 }
                 self.write_log("Getting an authorization code: " + url)
-                response = self.get(url, headers=self.headers, params=params)
+                response = self.get(
+                    url,
+                    headers=self.headers,
+                    params=params,
+                    timeout=self.timeout,
+                )
                 response.raise_for_status()
-                try:
-                    code = parse_qs(urlparse(response.url).query).get("code")[0]
-                except Exception as e:
+                codes = parse_qs(urlparse(response.url).query).get("code")
+                if not codes:
                     webbrowser.open(response.url)
-                    print(
-                        "Please log in to the web page that just opened and try again."
-                    )
-                    sys.exit(2)
+                    print("Please log in to the web page that just opened and try again.")
+                    self.write_log("Login flow did not return an OAuth code.")
+                    return
+                code = codes[0]
 
                 url = "https://ident.familysearch.org/cis-web/oauth2/v3/token"
                 self.write_log("Exchanging for an access token: " + url)
@@ -120,6 +128,7 @@ class Session(requests.Session):
                         "redirect_uri": self.redirect_uri,
                     },
                     headers=self.headers,
+                    timeout=self.timeout,
                 )
 
                 try:
@@ -131,99 +140,111 @@ class Session(requests.Session):
                 if "access_token" not in data:
                     self.write_log(res.text)
                     continue
-                access_token = data["access_token"]
-                self.headers.update({"Authorization": f"Bearer {access_token}"})
+                self.headers.update({"Authorization": "******"})
 
             except requests.exceptions.ReadTimeout:
                 self.write_log("Read timed out")
                 continue
             except requests.exceptions.ConnectionError:
                 self.write_log("Connection aborted")
-                time.sleep(self.timeout)
+                time.sleep(min(2**attempt, 60))
                 continue
             except requests.exceptions.HTTPError:
                 self.write_log("HTTPError")
-                time.sleep(self.timeout)
+                time.sleep(min(2**attempt, 60))
                 continue
             except KeyError:
                 self.write_log("KeyError")
-                time.sleep(self.timeout)
+                time.sleep(min(2**attempt, 60))
                 continue
             except ValueError:
                 self.write_log("ValueError")
-                time.sleep(self.timeout)
+                time.sleep(min(2**attempt, 60))
                 continue
             if self.logged:
                 self.set_current()
                 break
+        if not self.logged:
+            self.write_log("Login failed after retries; session cookie was not established.")
 
-    def get_url(self, url, headers=None, no_api=False):
-        """retrieve JSON structure from a FamilySearch URL"""
+    def get_url(
+        self, url: str, headers: dict[str, str] | None = None
+    ) -> tuple[dict[str, Any] | None, str | None, int | None]:
+        """Get one API URL and return parsed JSON, raw body, and HTTP status."""
         self.counter += 1
-        if headers is None:
-            headers = {"Accept": "application/x-gedcomx-v1+json"}
-        headers.update(self.headers)
+        request_headers = {"Accept": "application/x-gedcomx-v1+json"}
+        if headers:
+            request_headers.update(headers)
+        request_headers.update(self.headers)
         base = "https://api.familysearch.org"
-        if no_api:
-            base = "https://familysearch.org"
+        last_status: int | None = None
+
         for attempt in range(10):
             try:
                 self.write_log("Downloading: " + url)
-                r = self.get(base + url, timeout=self.timeout, headers=headers)
+                response = self.get(
+                    base + url,
+                    timeout=self.timeout,
+                    headers=request_headers,
+                )
             except requests.exceptions.ReadTimeout:
                 self.write_log("Read timed out")
                 continue
             except requests.exceptions.ConnectionError:
                 self.write_log("Connection aborted")
-                time.sleep(self.timeout)
+                time.sleep(min(2**attempt, 60))
                 continue
-            self.write_log("Status code: %s" % r.status_code)
-            if r.status_code == 204:
-                return None
-            if r.status_code in {404, 405, 410}:
+
+            last_status = response.status_code
+            self.write_log("Status code: %s" % response.status_code)
+            if response.status_code == 204:
+                return None, None, response.status_code
+            if response.status_code in {404, 405, 410}:
                 self.write_log("WARNING: " + url)
-                return None
-            if r.status_code == 500:
+                return None, None, response.status_code
+            if response.status_code == 500:
                 self.write_log("WARNING: HTTP 500 from " + url)
-                time.sleep(self.timeout)
+                time.sleep(min(2**attempt, 60))
                 continue
-            if r.status_code == 401:
+            if response.status_code == 401:
                 self.login()
                 continue
+
             try:
-                r.raise_for_status()
+                response.raise_for_status()
             except requests.exceptions.HTTPError:
                 self.write_log("HTTPError")
-                if r.status_code == 403:
-                    if (
-                        "message" in r.json()["errors"][0]
-                        and r.json()["errors"][0]["message"]
-                        == "Unable to get ordinances."
-                    ):
-                        self.write_log(
-                            "Unable to get ordinances. "
-                            "Try with an LDS account or without option -c."
-                        )
-                        return "error"
-                    self.write_log(
-                        "WARNING: code 403 from %s %s"
-                        % (url, r.json()["errors"][0]["message"] or "")
-                    )
-                    return None
-                time.sleep(self.timeout)
+                if response.status_code == 403:
+                    try:
+                        message = response.json()["errors"][0]["message"] or ""
+                        self.write_log(f"WARNING: code 403 from {url} {message}")
+                        return None, None, response.status_code
+                    except (ValueError, KeyError, IndexError):
+                        time.sleep(min(2**attempt, 60))
+                        continue
+                time.sleep(min(2**attempt, 60))
                 continue
-            try:
-                return r.json()
-            except Exception as e:
-                self.write_log("WARNING: corrupted file from %s, error: %s" % (url, e))
-                return None
-        self.write_log("WARNING: max retries exceeded for %s" % url)
-        return None
 
-    def set_current(self):
-        """retrieve FamilySearch current user ID, name and language"""
+            raw_text = response.text
+            try:
+                return response.json(), raw_text, response.status_code
+            except ValueError as error:
+                self.write_log("WARNING: corrupted file from %s, error: %s" % (url, error))
+                return None, raw_text, response.status_code
+
+        self.failed_requests += 1
+        warning = (
+            f"WARNING: max retries exceeded for {url} "
+            f"(failed_requests={self.failed_requests})\n"
+        )
+        sys.stderr.write(warning)
+        self.write_log("WARNING: max retries exceeded for %s" % url)
+        return None, None, last_status
+
+    def set_current(self) -> None:
+        """Retrieve FamilySearch current user ID, name, and language."""
         url = "/platform/users/current"
-        data = self.get_url(url)
+        data, _, _ = self.get_url(url)
         if data:
             self.fid = data["users"][0]["personId"]
             self.lang = data["users"][0]["preferredLanguage"]
