@@ -20,6 +20,16 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
+          # Pinned to the version used to generate uv.lock (lockfile schema
+          # `revision = 3`). Without a pin this defaults to whatever uv
+          # release is newest at run time; uv's lockfile schema has changed
+          # across versions (older uv can't parse a newer-schema lockfile
+          # and vice versa), so version drift here makes `uv sync --locked`
+          # fail immediately in CI regardless of pyproject.toml/uv.lock
+          # actually being in sync. `[tool.uv] required-version` in
+          # pyproject.toml enforces the same version for local `uv` runs.
+          # Bump deliberately together with `uv lock --upgrade`.
+          version: "0.12.9"
           python-version: "3.12"
 
       - name: Install from the lockfile

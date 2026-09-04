@@ -42,6 +42,15 @@ dev = [
     "pytest>=9.1.1",
 ]
 
+[tool.uv]
+# Pinned to match .github/workflows/quality-gate.yml and the schema uv.lock
+# was generated with. uv's lockfile schema changes across versions (an
+# older uv can't parse a newer-schema lockfile and vice versa), so an
+# unpinned/mismatched uv makes `uv sync --locked` fail even when
+# pyproject.toml and uv.lock are actually in sync. Bump deliberately
+# together with the CI pin and `uv lock --upgrade`.
+required-version = "==0.12.9"
+
 [project.urls]
 HomePage = "https://github.com/Linekio/getmyancestors"
 
