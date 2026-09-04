@@ -29,28 +29,84 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="getmyancestors")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    fetch_parser = subparsers.add_parser("fetch")
-    fetch_parser.add_argument("--db", required=True)
-    fetch_parser.add_argument("-u", "--username", required=True)
-    fetch_parser.add_argument("-p", "--password")
-    fetch_parser.add_argument("-i", "--ids", nargs="+", type=_fid)
-    fetch_parser.add_argument("-a", "--ascend", type=int, default=4)
-    fetch_parser.add_argument("-d", "--descend", type=int, default=0)
-    fetch_parser.add_argument("-m", "--marriages", action="store_true")
-    fetch_parser.add_argument("--no-sources", action="store_true")
-    fetch_parser.add_argument("--no-notes", action="store_true")
-    fetch_parser.add_argument("--no-memories", action="store_true")
-    fetch_parser.add_argument("--rate-limit", type=int, default=2)
-    fetch_parser.add_argument("--timeout", type=int, default=60)
-    fetch_parser.add_argument("-v", "--verbose", action="store_true")
+    fetch_parser = subparsers.add_parser(
+        "fetch", help="log in and capture raw FamilySearch API responses into the SQLite file"
+    )
+    fetch_parser.add_argument(
+        "--db", required=True, help="path to the SQLite capture database (created if missing)"
+    )
+    fetch_parser.add_argument("-u", "--username", required=True, help="FamilySearch.org username")
+    fetch_parser.add_argument(
+        "-p",
+        "--password",
+        help="FamilySearch.org password; omit to be prompted (recommended, avoids shell history)",
+    )
+    fetch_parser.add_argument(
+        "-i",
+        "--ids",
+        nargs="+",
+        type=_fid,
+        help="one or more starting FamilySearch person IDs, e.g. AAAA-001; "
+        "default: the logged-in user's own person ID",
+    )
+    fetch_parser.add_argument(
+        "-a",
+        "--ascend",
+        type=int,
+        default=4,
+        help="number of ancestor generations to walk upward from the starting person(s) (default: 4)",
+    )
+    fetch_parser.add_argument(
+        "-d",
+        "--descend",
+        type=int,
+        default=0,
+        help="number of descendant generations to walk downward from the starting person(s) (default: 0)",
+    )
+    fetch_parser.add_argument(
+        "-m",
+        "--marriages",
+        action="store_true",
+        help="also fetch spouses and couple-relationship details (marriage facts/notes)",
+    )
+    fetch_parser.add_argument(
+        "--no-sources", action="store_true", help="skip fetching each person's sources (fetched by default)"
+    )
+    fetch_parser.add_argument(
+        "--no-notes", action="store_true", help="skip fetching person/couple notes (fetched by default)"
+    )
+    fetch_parser.add_argument(
+        "--no-memories", action="store_true", help="skip fetching linked memories (fetched by default)"
+    )
+    fetch_parser.add_argument(
+        "--rate-limit", type=int, default=2, help="maximum FamilySearch API requests per second (default: 2)"
+    )
+    fetch_parser.add_argument(
+        "--timeout", type=int, default=60, help="per-request HTTP timeout in seconds (default: 60)"
+    )
+    fetch_parser.add_argument(
+        "-v", "--verbose", action="store_true", help="print each HTTP request to stderr as it happens"
+    )
 
-    load_parser = subparsers.add_parser("load")
-    load_parser.add_argument("--db", required=True)
-    load_parser.add_argument("--run", type=int)
+    load_parser = subparsers.add_parser(
+        "load", help="rebuild the relational tables from a captured run's raw JSON (no network access)"
+    )
+    load_parser.add_argument("--db", required=True, help="path to the SQLite capture database")
+    load_parser.add_argument(
+        "--run", type=int, help="run ID to load; default: the most recently finished fetch run"
+    )
 
-    diff_parser = subparsers.add_parser("diff")
-    diff_parser.add_argument("--db", required=True)
-    diff_parser.add_argument("--runs", nargs=2, type=int, metavar=("OLD", "NEW"))
+    diff_parser = subparsers.add_parser(
+        "diff", help="report person IDs that appeared/disappeared between two fetch runs (no network access)"
+    )
+    diff_parser.add_argument("--db", required=True, help="path to the SQLite capture database")
+    diff_parser.add_argument(
+        "--runs",
+        nargs=2,
+        type=int,
+        metavar=("OLD", "NEW"),
+        help="the two run IDs to compare; default: the two most recent finished runs",
+    )
 
     return parser
 

@@ -20,11 +20,29 @@ All commands require `--db` and use the same SQLite file.
 
 ### fetch
 
-Capture FamilySearch API responses into raw tables.
+Log in and capture FamilySearch API responses into the raw `api_response` table.
 
 ```bash
 getmyancestors fetch --db family.sqlite -u USERNAME -i AAAA-001 -a 4 -d 1 -m -v
 ```
+
+| Flag | Meaning |
+| --- | --- |
+| `--db PATH` | Path to the SQLite capture database (required; created if it doesn't exist). |
+| `-u`, `--username USERNAME` | FamilySearch.org username (required). |
+| `-p`, `--password PASSWORD` | FamilySearch.org password. Omit it to be prompted instead (recommended — an argument value can leak into shell history/process listings). |
+| `-i`, `--ids FID [FID ...]` | One or more starting FamilySearch person IDs (format `AAAA-001`). Default: the logged-in user's own person ID. |
+| `-a`, `--ascend N` | Number of ancestor generations to walk upward from the starting person(s). Default: `4`. |
+| `-d`, `--descend N` | Number of descendant generations to walk downward from the starting person(s). Default: `0`. |
+| `-m`, `--marriages` | Also fetch each fetched person's spouse(s) and couple-relationship details (marriage/divorce facts and notes). Off by default. |
+| `--no-sources` | Skip fetching each person's sources. Sources are fetched by default. |
+| `--no-notes` | Skip fetching person/couple notes. Notes are fetched by default. |
+| `--no-memories` | Skip fetching linked memories (photos/documents attached to a person). Memories are fetched by default. |
+| `--rate-limit N` | Maximum FamilySearch API requests per second. Default: `2`. |
+| `--timeout SECONDS` | Per-request HTTP timeout. Default: `60`. |
+| `-v`, `--verbose` | Print each HTTP request to stderr as it happens. Failures are always reported regardless of this flag. |
+
+Run `getmyancestors fetch --help` (or `load --help` / `diff --help`) for the same descriptions from the CLI itself.
 
 ### load
 
