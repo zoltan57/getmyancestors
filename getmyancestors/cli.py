@@ -164,7 +164,6 @@ def _run_fetch_command(args: argparse.Namespace, argv: list[str]) -> int:
     session = Session(
         username=args.username,
         password=password,
-        verbose=args.verbose,
         timeout=args.timeout,
         rate_limit=args.rate_limit,
     )

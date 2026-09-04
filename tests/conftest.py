@@ -7,7 +7,8 @@ running the real FamilySearch login flow in tests.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,15 @@ import requests
 
 from getmyancestors.db import connect, init_schema
 from getmyancestors.session import DEFAULT_CLIENT_ID, DEFAULT_REDIRECT_URI, Session
+
+
+@pytest.fixture(autouse=True)
+def _reset_getmyancestors_logger() -> Generator[None, None, None]:
+    logger = logging.getLogger("getmyancestors")
+    yield
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+    logger.setLevel(logging.NOTSET)
 
 
 @pytest.fixture
@@ -28,8 +38,6 @@ def session_factory() -> Callable[[], Session]:
         session.password = "pass"
         session.client_id = DEFAULT_CLIENT_ID
         session.redirect_uri = DEFAULT_REDIRECT_URI
-        session.verbose = False
-        session.logfile = None
         session.timeout = 7
         session.fid = None
         session.lang = None

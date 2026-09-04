@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -169,3 +170,48 @@ def test_get_url_401_triggers_one_relogin_then_retry(
     assert data == {"users": []}
     assert raw_text == '{"users": []}'
     assert status == 200
+
+
+def test_get_url_debug_message_requires_debug_caplog_level(
+    session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    session = session_factory()
+    monkeypatch.setattr(
+        session,
+        "get",
+        lambda *args, **kwargs: DummyResponse(status_code=200, text='{"ok": true}', json_data={"ok": True}),
+    )
+
+    session.get_url("/platform/tree/persons?pids=AAAA-001")
+    assert "Status code: 200" not in caplog.text
+
+    caplog.clear()
+    caplog.set_level(logging.DEBUG, logger="getmyancestors")
+    session.get_url("/platform/tree/persons?pids=AAAA-001")
+    assert "Status code: 200" in caplog.text
+
+
+def test_get_url_logs_max_retries_exceeded_warning(
+    session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    session = session_factory()
+    monkeypatch.setattr(
+        session,
+        "get",
+        lambda *args, **kwargs: DummyResponse(status_code=500, text="server error"),
+    )
+    monkeypatch.setattr("getmyancestors.session.time.sleep", lambda *args, **kwargs: None)
+
+    data, raw_text, status = session.get_url("/platform/tree/persons/DDDD-004")
+
+    assert (data, raw_text, status) == (None, None, 500)
+    assert session.failed_requests == 1
+    warning_records = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert any(
+        record.message == "Max retries exceeded for /platform/tree/persons/DDDD-004 (failed_requests=1)"
+        for record in warning_records
+    )

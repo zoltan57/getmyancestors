@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from fnmatch import fnmatch
 from types import SimpleNamespace
@@ -188,3 +189,34 @@ def test_run_fetch_records_failed_response_and_returns_3(initialized_db, load_fi
     assert failed_row["ok"] == 0
     assert failed_row["http_status"] is None
     assert failed_row["body"] is None
+
+
+def test_run_fetch_logs_incomplete_capture_warning(initialized_db, load_fixture, caplog) -> None:
+    current_user = load_fixture("current_user.json")
+    persons_batch = load_fixture("persons_batch.json")
+    person_sources = load_fixture("person_sources.json")
+    person_notes = load_fixture("person_notes.json")
+    couple = load_fixture("couple.json")
+    memory = load_fixture("memory.json")
+
+    fixtures = {
+        "/platform/users/current": (current_user, '{"users":[{"personId":"AAAA-001"}]}', 200),
+        "/platform/tree/persons?pids=AAAA-001": (
+            persons_batch,
+            '{"persons":[{"id":"AAAA-001"},{"id":"BBBB-002"},{"id":"CCCC-003"}]}',
+            200,
+        ),
+        "/platform/tree/couple-relationships/REL-C-1": (couple, '{"relationships":[{"id":"REL-C-1"}]}', 200),
+        "/platform/tree/couple-relationships/REL-C-1/notes": (person_notes, '{"persons":[{"id":"AAAA-001"}]}', 200),
+        "/platform/tree/persons/*/sources": (person_sources, '{"persons":[{"id":"AAAA-001"}]}', 200),
+        "/platform/tree/persons/*/notes": (person_notes, '{"persons":[{"id":"AAAA-001"}]}', 200),
+        "/platform/memories/memories/MEM-9": (memory, '{"sourceDescriptions":[{"id":"MEM-9"}]}', 200),
+    }
+    session = FakeSession(fixtures, fail_urls={"/platform/tree/persons/BBBB-002/notes"})
+    opts = _make_opts()
+
+    exit_code = run_fetch(initialized_db, session, opts)
+
+    assert exit_code == 3
+    warning_records = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert any(record.message == "Captured data is incomplete because requests failed." for record in warning_records)

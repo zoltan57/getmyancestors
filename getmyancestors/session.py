@@ -7,10 +7,10 @@ API host with bounded retries and explicit timeout handling.
 
 from __future__ import annotations
 
-import sys
+import logging
 import time
 import webbrowser
-from typing import Any, TextIO
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import requests
@@ -19,6 +19,7 @@ from requests_ratelimiter import LimiterAdapter
 
 DEFAULT_CLIENT_ID = "a02j000000KTRjpAAH"
 DEFAULT_REDIRECT_URI = "https://misbach.github.io/fs-auth/index_raw.html"
+logger = logging.getLogger(__name__)
 
 
 class Session(requests.Session):
@@ -30,8 +31,6 @@ class Session(requests.Session):
         password: str,
         client_id: str | None = None,
         redirect_uri: str | None = None,
-        verbose: bool = False,
-        logfile: TextIO | None = None,
         timeout: int = 60,
         rate_limit: int = 2,
     ) -> None:
@@ -41,8 +40,6 @@ class Session(requests.Session):
         self.password = password
         self.client_id = client_id or DEFAULT_CLIENT_ID
         self.redirect_uri = redirect_uri or DEFAULT_REDIRECT_URI
-        self.verbose = verbose
-        self.logfile = logfile
         self.timeout = timeout
         self.fid: str | None = None
         self.lang: str | None = None
@@ -62,25 +59,17 @@ class Session(requests.Session):
         """Return whether the session cookie indicates a logged-in user."""
         return bool(self.cookies.get("fssessionid"))
 
-    def write_log(self, text: str) -> None:
-        """Write one log line to stderr and optional logfile."""
-        log = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]: {text}\n"
-        if self.verbose:
-            sys.stderr.write(log)
-        if self.logfile:
-            self.logfile.write(log)
-
     def login(self) -> None:
         """Run the FamilySearch OAuth login sequence."""
         for attempt in range(5):
             try:
                 url = "https://www.familysearch.org/auth/familysearch/login"
-                self.write_log("Downloading: " + url)
+                logger.debug("Downloading: " + url)
                 self.get(url, headers=self.headers, timeout=self.timeout)
                 xsrf = self.cookies["XSRF-TOKEN"]
 
                 url = "https://ident.familysearch.org/login"
-                self.write_log("Logging in: " + url)
+                logger.debug("Logging in: " + url)
                 res = self.post(
                     url,
                     data={
@@ -101,7 +90,7 @@ class Session(requests.Session):
                     "redirect_uri": self.redirect_uri,
                     "username": self.username,
                 }
-                self.write_log("Getting an authorization code: " + url)
+                logger.debug("Getting an authorization code: " + url)
                 response = self.get(
                     url,
                     headers=self.headers,
@@ -112,13 +101,13 @@ class Session(requests.Session):
                 codes = parse_qs(urlparse(response.url).query).get("code")
                 if not codes:
                     webbrowser.open(response.url)
-                    print("Please log in to the web page that just opened and try again.")
-                    self.write_log("Login flow did not return an OAuth code.")
+                    logger.warning("Please log in to the web page that just opened and try again.")
+                    logger.warning("Login flow did not return an OAuth code.")
                     return
                 code = codes[0]
 
                 url = "https://ident.familysearch.org/cis-web/oauth2/v3/token"
-                self.write_log("Exchanging for an access token: " + url)
+                logger.debug("Exchanging for an access token: " + url)
                 res = self.post(
                     url,
                     data={
@@ -134,38 +123,38 @@ class Session(requests.Session):
                 try:
                     data = res.json()
                 except ValueError:
-                    self.write_log("Invalid auth request")
+                    logger.warning("Invalid auth request")
                     continue
 
                 if "access_token" not in data:
-                    self.write_log(res.text)
+                    logger.warning(res.text)
                     continue
                 self.headers.update({"Authorization": "******"})
 
             except requests.exceptions.ReadTimeout:
-                self.write_log("Read timed out")
+                logger.warning("Read timed out")
                 continue
             except requests.exceptions.ConnectionError:
-                self.write_log("Connection aborted")
+                logger.warning("Connection aborted")
                 time.sleep(min(2**attempt, 60))
                 continue
             except requests.exceptions.HTTPError:
-                self.write_log("HTTPError")
+                logger.warning("HTTPError")
                 time.sleep(min(2**attempt, 60))
                 continue
             except KeyError:
-                self.write_log("KeyError")
+                logger.warning("KeyError")
                 time.sleep(min(2**attempt, 60))
                 continue
             except ValueError:
-                self.write_log("ValueError")
+                logger.warning("ValueError")
                 time.sleep(min(2**attempt, 60))
                 continue
             if self.logged:
                 self.set_current()
                 break
         if not self.logged:
-            self.write_log("Login failed after retries; session cookie was not established.")
+            logger.warning("Login failed after retries; session cookie was not established.")
 
     def get_url(
         self, url: str, headers: dict[str, str] | None = None
@@ -181,29 +170,29 @@ class Session(requests.Session):
 
         for attempt in range(10):
             try:
-                self.write_log("Downloading: " + url)
+                logger.debug("Downloading: " + url)
                 response = self.get(
                     base + url,
                     timeout=self.timeout,
                     headers=request_headers,
                 )
             except requests.exceptions.ReadTimeout:
-                self.write_log("Read timed out")
+                logger.warning("Read timed out")
                 continue
             except requests.exceptions.ConnectionError:
-                self.write_log("Connection aborted")
+                logger.warning("Connection aborted")
                 time.sleep(min(2**attempt, 60))
                 continue
 
             last_status = response.status_code
-            self.write_log(f"Status code: {response.status_code}")
+            logger.debug(f"Status code: {response.status_code}")
             if response.status_code == 204:
                 return None, None, response.status_code
             if response.status_code in {404, 405, 410}:
-                self.write_log("WARNING: " + url)
+                logger.warning(url)
                 return None, None, response.status_code
             if response.status_code == 500:
-                self.write_log("WARNING: HTTP 500 from " + url)
+                logger.warning("HTTP 500 from " + url)
                 time.sleep(min(2**attempt, 60))
                 continue
             if response.status_code == 401:
@@ -213,11 +202,11 @@ class Session(requests.Session):
             try:
                 response.raise_for_status()
             except requests.exceptions.HTTPError:
-                self.write_log("HTTPError")
+                logger.warning("HTTPError")
                 if response.status_code == 403:
                     try:
                         message = response.json()["errors"][0]["message"] or ""
-                        self.write_log(f"WARNING: code 403 from {url} {message}")
+                        logger.warning(f"code 403 from {url} {message}")
                         return None, None, response.status_code
                     except (ValueError, KeyError, IndexError):
                         time.sleep(min(2**attempt, 60))
@@ -229,13 +218,11 @@ class Session(requests.Session):
             try:
                 return response.json(), raw_text, response.status_code
             except ValueError as error:
-                self.write_log(f"WARNING: corrupted file from {url}, error: {error}")
+                logger.warning(f"corrupted file from {url}, error: {error}")
                 return None, raw_text, response.status_code
 
         self.failed_requests += 1
-        warning = f"WARNING: max retries exceeded for {url} (failed_requests={self.failed_requests})\n"
-        sys.stderr.write(warning)
-        self.write_log(f"WARNING: max retries exceeded for {url}")
+        logger.warning(f"Max retries exceeded for {url} (failed_requests={self.failed_requests})")
         return None, None, last_status
 
     def set_current(self) -> None:

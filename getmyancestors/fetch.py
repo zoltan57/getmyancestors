@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -11,6 +11,7 @@ from typing import Any
 from getmyancestors.db import finish_run, start_run, store_response
 
 MAX_PERSONS = 200
+logger = logging.getLogger(__name__)
 
 
 def _chunks(items: Sequence[str], size: int) -> Iterable[list[str]]:
@@ -251,6 +252,6 @@ def run_fetch(conn: Any, session: Any, opts: Any) -> int:
 
     print(f"{requests_total} requests, {requests_failed} failed")
     if requests_failed > 0:
-        sys.stderr.write("WARNING: captured data is incomplete because requests failed.\n")
+        logger.warning("Captured data is incomplete because requests failed.")
         return 3
     return 0
