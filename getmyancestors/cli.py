@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import re
 import sys
@@ -15,9 +16,11 @@ from getmyancestors.db import connect, init_schema
 from getmyancestors.diff import diff
 from getmyancestors.fetch import run_fetch
 from getmyancestors.load import load
+from getmyancestors.logging_config import configure_logging, default_logfile_path
 from getmyancestors.session import Session
 
 FID_PATTERN = re.compile(r"[A-Z0-9]{4}-[A-Z0-9]{2,4}")
+logger = logging.getLogger(__name__)
 
 
 class EnvConfigError(Exception):
@@ -128,6 +131,12 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_parser.add_argument(
         "-v", "--verbose", action="store_true", help="print each HTTP request to stderr as it happens"
     )
+    fetch_parser.add_argument(
+        "--logfile",
+        help="write the full debug-level log to this file instead of the automatic default "
+        "(a timestamped file next to --db); a log file is always written for fetch, "
+        "regardless of -v/--verbose",
+    )
 
     load_parser = subparsers.add_parser(
         "load", help="rebuild the relational tables from a captured run's raw JSON (no network access)"
@@ -223,14 +232,24 @@ def main(argv: list[str] | None = None) -> int:
     try:
         parser = build_parser()
     except EnvConfigError as exc:
-        print(str(exc), file=sys.stderr)
+        propagate = logger.propagate
+        logger.propagate = False
+        try:
+            logger.error(str(exc))
+        finally:
+            logger.propagate = propagate
         return 2
 
     args = parser.parse_args(argv)
+    if args.command == "fetch" and not getattr(args, "logfile", None) and getattr(args, "db", None):
+        args.logfile = default_logfile_path(args.db)
+    configure_logging(verbose=getattr(args, "verbose", False), logfile=getattr(args, "logfile", None))
+    if args.command == "fetch" and args.logfile:
+        logger.warning(f"Writing full fetch log to {args.logfile}")
 
     error = _validate_required(args)
     if error:
-        print(f"error: {error}", file=sys.stderr)
+        logger.error(error)
         return 2
 
     try:
@@ -240,10 +259,10 @@ def main(argv: list[str] | None = None) -> int:
             return _run_load_command(args)
         if args.command == "diff":
             return _run_diff_command(args)
-        print(f"Unknown command: {args.command}", file=sys.stderr)
+        logger.error(f"Unknown command: {args.command}")
         return 2
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001 - top-level boundary: report and exit 1 rather than a traceback
-        print(str(exc), file=sys.stderr)
+        logger.error(str(exc))
         return 1

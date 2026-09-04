@@ -39,6 +39,19 @@ environment variable.
 instead, which is the more secure option since it never touches shell history or a
 plaintext file.
 
+## Logging
+
+Diagnostics are emitted with Python's `logging` module to stderr. By default, only
+warning/error diagnostics are shown on the console.
+
+With `-v`/`--verbose`, debug-level request diagnostics are also shown on the
+console.
+
+For `fetch`, a full debug-level log file is always written, regardless of `-v`.
+By default it is auto-named next to `--db` (for example
+`family.sqlite.20260904T170300Z.log`). Use `--logfile PATH` to override that
+location and filename.
+
 ## Commands
 
 All commands require `--db` and use the same SQLite file.
@@ -65,7 +78,8 @@ getmyancestors fetch --db family.sqlite -u USERNAME -i AAAA-001 -a 4 -d 1 -m -v
 | `--no-memories` | Skip fetching linked memories (photos/documents attached to a person). Memories are fetched by default. |
 | `--rate-limit N` | Maximum FamilySearch API requests per second. Default: `2` (or `FS_RATE_LIMIT`). |
 | `--timeout SECONDS` | Per-request HTTP timeout. Default: `60` (or `FS_TIMEOUT`). |
-| `-v`, `--verbose` | Print each HTTP request to stderr as it happens. Failures are always reported regardless of this flag. |
+| `-v`, `--verbose` | Print each HTTP request to stderr as it happens (via `logging` at debug level). Failures are always reported regardless of this flag. |
+| `--logfile PATH` | Write the full debug-level fetch log to this path instead of the automatic default (`<db>.<timestamp>.log` next to `--db`). A log file is always written for `fetch`, even without `-v`. |
 
 Run `getmyancestors fetch --help` (or `load --help` / `diff --help`) for the same descriptions from the CLI itself.
 

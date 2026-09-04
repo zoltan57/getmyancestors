@@ -66,8 +66,9 @@ def test_missing_db_without_env_returns_exit_code_2(capsys: pytest.CaptureFixtur
 
 def test_missing_username_for_fetch_without_env_returns_exit_code_2(
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
-    exit_code = cli.main(["fetch", "--db", "somewhere.sqlite"])
+    exit_code = cli.main(["fetch", "--db", str(tmp_path / "somewhere.sqlite")])
     assert exit_code == 2
     assert "FS_USERNAME" in capsys.readouterr().err
 
@@ -97,3 +98,41 @@ def test_invalid_int_env_var_returns_exit_code_2(
 
     assert exit_code == 2
     assert "FS_RATE_LIMIT" in capsys.readouterr().err
+
+
+def test_fetch_without_logfile_creates_auto_logfile_even_on_validation_error(tmp_path: Path) -> None:
+    db_path = tmp_path / "family.sqlite"
+
+    exit_code = cli.main(["fetch", "--db", str(db_path)])
+
+    assert exit_code == 2
+    logfiles = list(tmp_path.glob("family.sqlite.*.log"))
+    assert len(logfiles) == 1
+    assert logfiles[0].read_text(encoding="utf-8")
+
+
+def test_fetch_with_explicit_logfile_overrides_auto_default(tmp_path: Path) -> None:
+    db_path = tmp_path / "family.sqlite"
+    custom_log = tmp_path / "custom.log"
+
+    exit_code = cli.main(["fetch", "--db", str(db_path), "--logfile", str(custom_log)])
+
+    assert exit_code == 2
+    assert custom_log.exists()
+    assert custom_log.read_text(encoding="utf-8")
+    assert list(tmp_path.glob("family.sqlite.*.log")) == []
+
+
+def test_repeated_main_calls_do_not_duplicate_stderr_messages(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    args = ["fetch", "--db", str(tmp_path / "family.sqlite")]
+
+    first_code = cli.main(args)
+    assert first_code == 2
+    capsys.readouterr()
+
+    second_code = cli.main(args)
+    assert second_code == 2
+    second_err = capsys.readouterr().err
+    assert second_err.count("FS_USERNAME") == 1
