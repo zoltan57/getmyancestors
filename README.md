@@ -1,94 +1,76 @@
-getmyancestors
-==============
+# getmyancestors
 
-_getmyancestors_ is a python3 package that downloads family trees in GEDCOM format from FamilySearch.
+`getmyancestors` is a command-line tool for capturing FamilySearch tree data as raw JSON and loading that capture into relational SQLite tables for downstream transcription workflows.
 
-This program is now in production phase, but bugs might still be present. Features will be added on request. It is provided as is.
+## Design rule
 
-The project is maintained at https://github.com/Linekio/getmyancestors. Visit here for the latest version and more information.
+Raw capture rows in `api_response` are the source of truth. Relational tables are a derived view that can be dropped and rebuilt by running `load` again, without re-fetching.
 
-This package requires Python 3.12+. Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`.
+## Install
 
+From the repository root:
 
-Installation
-============
-
-The easiest way to install _getmyancestors_ is with [uv](https://docs.astral.sh/uv/), from the repository root:
-
-`uv sync`
-
-Or install it with pip:
-
-`pip install .`
-
-How to use
-==========
-
-With graphical user interface:
-
-```
-fstogedcom
+```bash
+uv sync --locked
 ```
 
-Command line examples:
+## Commands
 
-Download four generations of ancestors for the main individual in your tree and output gedcom on stdout (will prompt for username and password):
+All commands require `--db` and use the same SQLite file.
 
-```
-getmyancestors
-```
+### fetch
 
-Download four generations of ancestors and output gedcom to a file while generating a verbode stderr (will prompt for username and password):
+Capture FamilySearch API responses into raw tables.
 
-```
-getmyancestors -o out.ged -v
+```bash
+getmyancestors fetch --db family.sqlite -u USERNAME -i AAAA-001 -a 4 -d 1 -m -v
 ```
 
-Download four generations of ancestors for individual LF7T-Y4C and generate a verbose log file:
+### load
 
-```
-getmyancestors -u username -p password -i LF7T-Y4C -o out.ged -l out.log -v
-```
+Load relational tables from a captured run (default: latest finished run).
 
-Download six generations of ancestors for individual LF7T-Y4C and generate a verbose log file:
-
-```
-getmyancestors -a 6 -u username -p password -i LF7T-Y4C -o out.ged -l out.log -v
+```bash
+getmyancestors load --db family.sqlite
+getmyancestors load --db family.sqlite --run 12
 ```
 
-Download four generations of ancestors for individual LF7T-Y4C including all their children and their children spouses:
+### diff
 
-```
-getmyancestors -d 1 -m -u username -p password -i LF7T-Y4C -o out.ged
-```
+Compare two captured runs (default: two most recent finished runs).
 
-Download six generations of ancestors for individuals L4S5-9X4 and LHWG-18F including all their children, grandchildren and their spouses:
-
-```
-getmyancestors -a 6 -d 2 -m -u username -p password -i L4S5-9X4 LHWG-18F -o out.ged
+```bash
+getmyancestors diff --db family.sqlite
+getmyancestors diff --db family.sqlite --runs 11 12
 ```
 
-Download four generations of ancestors for individual LF7T-Y4C including LDS ordinances (need LDS account)
+## Schema at a glance
 
-```
-getmyancestors -c -u username -p password -i LF7T-Y4C -o out.ged
-```
+Capture layer:
 
-Merge two Gedcom files
+- `fetch_run`: one row per fetch execution with counters and timings.
+- `api_response`: one row per request, including kind/url/status and raw JSON body text.
 
-```
-mergemyancestors -i file1.ged file2.ged -o out.ged
-```
+Relational layer (rebuilt by `load`):
 
+- `individual`, `name`
+- `family`, `family_child`
+- `event`
+- `source`, `source_link`
+- `note`
+- `memory`
 
-Support
-=======
+## Exit codes
 
-Submit questions or suggestions, or feature requests by opening an Issue at https://github.com/Linekio/getmyancestors/issues
+- `0`: success
+- `1`: unexpected error
+- `2`: bad arguments or login failure
+- `3`: fetch completed, but one or more requests permanently failed (captured data is incomplete)
 
-Donation
-========
+## Refresh workflow
 
-If this project help you, you can give me a tip :)
-
-[![paypal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=98X3CY93XTAYJ)
+1. `getmyancestors fetch --db family.sqlite ...`
+2. Check exit code (especially code `3` for incomplete capture).
+3. `getmyancestors load --db family.sqlite`
+4. `getmyancestors diff --db family.sqlite`
+5. Review disappeared FIDs before updating any external document mappings keyed to FamilySearch IDs.

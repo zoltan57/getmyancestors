@@ -7,9 +7,9 @@ import re
 import sys
 from getpass import getpass
 from pathlib import Path
-from typing import Any
 
 from getmyancestors.db import connect, init_schema
+from getmyancestors.diff import diff
 from getmyancestors.fetch import run_fetch
 from getmyancestors.load import load
 from getmyancestors.session import Session
@@ -89,6 +89,21 @@ def _run_load_command(args: argparse.Namespace) -> int:
         connection.close()
 
 
+def _run_diff_command(args: argparse.Namespace) -> int:
+    """Execute the diff subcommand."""
+    connection = connect(Path(args.db))
+    try:
+        init_schema(connection)
+        if args.runs:
+            old_run, new_run = args.runs
+            diff(connection, old_run, new_run)
+        else:
+            diff(connection)
+        return 0
+    finally:
+        connection.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse CLI arguments and dispatch subcommands."""
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -101,8 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "load":
             return _run_load_command(args)
         if args.command == "diff":
-            print("diff is not implemented yet", file=sys.stderr)
-            return 1
+            return _run_diff_command(args)
         print(f"Unknown command: {args.command}", file=sys.stderr)
         return 2
     except SystemExit:
