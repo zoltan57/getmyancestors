@@ -1,12 +1,47 @@
 # Project Plan: Migrate ad-hoc `print`/`write_log` diagnostics to `logging`
 
-**Status:** Approved plan, ready for implementation.
+**Status:** Implemented (Phase 1: `a7cb86c`, Phase 2: `d92ee09`). All acceptance
+checks pass. See "Implementation notes / deviations" below for two places where the
+shipped code deliberately diverges from this plan's original wording.
 **Written:** 2026-09-04, against commit `d10ef5ed71a4b63db6322b9618cecfa73d890666`.
 **Companion documents:** `docs/plans/2026-09-03-json-capture-rework.md` (the rework this
 builds on — do not re-read it before starting; it is historical context only, nothing
 in it should be redone), `docs/decisions/2026-09-04-technical-stack.md` (records why
 this project has no lint/type-check tooling beyond what's listed there as of its
 writing — logging is not covered there and does not need an entry added).
+
+## Implementation notes / deviations (added post-review)
+
+The shipped code correctly diverges from this plan's original wording in two places.
+Both divergences were required for correctness/tests to pass; neither should be
+"fixed" back to the plan's original wording.
+
+1. **§2.1's `logger.setLevel(...)` line.** The plan says `logger.setLevel(logging.
+   DEBUG if verbose else logging.WARNING)`. The shipped code instead uses
+   `logging.DEBUG if (verbose or logfile is not None) else logging.WARNING`. The
+   plan's literal version is a real bug: a logger's own effective level filters
+   records *before* they ever reach a handler, so with `verbose=False` the
+   `FileHandler` (fixed at `DEBUG` per §2.1) would never actually receive a debug
+   record — silently breaking the "file always gets full detail regardless of
+   `-v`" requirement that motivated §2.1a, in exactly the common case where it
+   matters most (`fetch` with `verbose=False` but a logfile always set). Confirmed
+   by direct reproduction and by `test_configure_logging_logfile_always_receives_debug`
+   in `tests/test_logging_config.py`, which would fail under the plan's literal
+   wording.
+2. **§2.4's `EnvConfigError` handler in `cli.py`.** The plan says this path should
+   be left with no configured handler, relying on Python's `logging.lastResort`
+   fallback to print to real stderr, and explicitly says not to add anything here.
+   The shipped code additionally toggles `logger.propagate = False` around the
+   single `logger.error(str(exc))` call in that branch, then restores it. This is
+   required under pytest specifically: pytest's own logging plugin attaches a
+   handler to the *root* logger for the duration of every test, which makes
+   `logging`'s handler-search see a handler somewhere in the propagation chain and
+   never fall back to `lastResort` — so, contrary to the plan's assumption, the
+   message would never reach real stderr (and thus never reach `capsys`) during a
+   pytest run. Confirmed by direct reproduction (a minimal probe test shows
+   `capsys` sees nothing without the propagate toggle) and by the pre-existing
+   `test_invalid_int_env_var_returns_exit_code_2` in `tests/test_cli.py`, which
+   asserts on `capsys` and would fail without this workaround.
 
 ---
 
