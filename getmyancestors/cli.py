@@ -51,6 +51,25 @@ def _env_int(name: str, fallback: int) -> int:
         raise EnvConfigError(f"Invalid integer in environment variable {name}: {value!r}") from error
 
 
+def _env_bool(name: str) -> bool:
+    """Return a bool environment variable value, defaulting to False when unset-ish."""
+    value = os.environ.get(name)
+    if value is None:
+        return False
+    normalized = value.strip().lower()
+    if normalized in ("", "0", "false"):
+        return False
+    return True
+
+
+def _cap_max_persons(value: int) -> int:
+    """Apply FamilySearch's documented max-persons ceiling."""
+    if value > 200:
+        logger.warning(f"--max-persons {value} exceeds FamilySearch's documented maximum of 200; using 200 instead.")
+        return 200
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Create the top-level CLI parser."""
     parser = argparse.ArgumentParser(prog="getmyancestors")
@@ -101,19 +120,38 @@ def build_parser() -> argparse.ArgumentParser:
         "falls back to the FS_DESCEND environment variable (default: 0)",
     )
     fetch_parser.add_argument(
+        "--max-persons",
+        type=int,
+        default=_cap_max_persons(_env_int("FS_MAX_PERSONS", 200)),
+        help="maximum person IDs per /platform/tree/persons batch request; "
+        "falls back to the FS_MAX_PERSONS environment variable (default: 200)",
+    )
+    fetch_parser.add_argument(
         "-m",
         "--marriages",
         action="store_true",
         help="also fetch spouses and couple-relationship details (marriage facts/notes)",
     )
     fetch_parser.add_argument(
-        "--no-sources", action="store_true", help="skip fetching each person's sources (fetched by default)"
+        "--no-sources",
+        action=argparse.BooleanOptionalAction,
+        default=_env_bool("FS_NO_SOURCES"),
+        help="skip fetching each person's sources (fetched by default); "
+        "falls back to the FS_NO_SOURCES environment variable",
     )
     fetch_parser.add_argument(
-        "--no-notes", action="store_true", help="skip fetching person/couple notes (fetched by default)"
+        "--no-notes",
+        action=argparse.BooleanOptionalAction,
+        default=_env_bool("FS_NO_NOTES"),
+        help="skip fetching person/couple notes (fetched by default); "
+        "falls back to the FS_NO_NOTES environment variable",
     )
     fetch_parser.add_argument(
-        "--no-memories", action="store_true", help="skip fetching linked memories (fetched by default)"
+        "--no-memories",
+        action=argparse.BooleanOptionalAction,
+        default=_env_bool("FS_NO_MEMORIES"),
+        help="skip fetching linked memories (fetched by default); "
+        "falls back to the FS_NO_MEMORIES environment variable",
     )
     # No numeric rate limit is published by FamilySearch; 2/sec is a conservative
     # self-imposed default, not a documented safe value -- get_url() also honors
@@ -174,6 +212,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _run_fetch_command(args: argparse.Namespace, argv: list[str]) -> int:
     """Execute the fetch subcommand."""
+    args.max_persons = _cap_max_persons(int(args.max_persons))
     password = args.password if args.password is not None else getpass("Password: ")
     session = Session(
         username=args.username,

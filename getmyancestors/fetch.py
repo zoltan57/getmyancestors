@@ -10,11 +10,6 @@ from typing import Any
 
 from getmyancestors.db import finish_run, start_run, store_response
 
-# FamilySearch's own current API reference documents this exact cap for
-# GET /platform/tree/persons?pids=... ("no more than 200 person ids") -- not
-# an arbitrary/tunable value. See docs/decisions/2026-09-04-familysearch-api-limits.md
-# (SS2) for the verified source and why this shouldn't be raised.
-MAX_PERSONS = 200
 logger = logging.getLogger(__name__)
 
 
@@ -100,6 +95,12 @@ def run_fetch(conn: Any, session: Any, opts: Any) -> int:
     run_id = start_run(conn, _redact_argv(argv))
     requests_total = 0
     requests_failed = 0
+    max_persons = int(getattr(opts, "max_persons", 200))
+    if max_persons > 200:
+        logger.warning(
+            f"--max-persons {max_persons} exceeds FamilySearch's documented maximum of 200; using 200 instead."
+        )
+        max_persons = 200
 
     fetched: set[str] = set()
     child_to_parents: dict[str, set[tuple[str | None, str | None]]] = defaultdict(set)
@@ -153,7 +154,7 @@ def run_fetch(conn: Any, session: Any, opts: Any) -> int:
         if not frontier:
             return
         pending = sorted(frontier - fetched)
-        for chunk in _chunks(pending, MAX_PERSONS):
+        for chunk in _chunks(pending, max_persons):
             pids = ",".join(chunk)
             url = f"/platform/tree/persons?pids={pids}"
             payload = request(

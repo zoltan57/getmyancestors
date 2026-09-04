@@ -54,6 +54,10 @@ environment variable.
 | `FS_TIMEOUT` | `--timeout` | `fetch` |
 | `FS_ASCEND` | `-a`/`--ascend` | `fetch` |
 | `FS_DESCEND` | `-d`/`--descend` | `fetch` |
+| `FS_MAX_PERSONS` | `--max-persons` | `fetch` |
+| `FS_NO_SOURCES` | `--no-sources`/`--no-no-sources` | `fetch` |
+| `FS_NO_NOTES` | `--no-notes`/`--no-no-notes` | `fetch` |
+| `FS_NO_MEMORIES` | `--no-memories`/`--no-no-memories` | `fetch` |
 
 `--db` and `-u`/`--username` are the only values that must come from *somewhere*
 (flag or environment variable) — omitting both is a bad-argument error (exit code
@@ -94,10 +98,11 @@ getmyancestors fetch --db family.sqlite -u USERNAME -i AAAA-001 -a 4 -d 1 -m -v
 | `-i`, `--ids FID [FID ...]` | One or more starting FamilySearch person IDs (format `AAAA-001`). Default: the logged-in user's own person ID. |
 | `-a`, `--ascend N` | Number of ancestor generations to walk upward from the starting person(s). Default: `4` (or `FS_ASCEND`). |
 | `-d`, `--descend N` | Number of descendant generations to walk downward from the starting person(s). Default: `0` (or `FS_DESCEND`). |
+| `--max-persons N` | Maximum person IDs per `/platform/tree/persons?pids=...` batch request. Default: `200` (or `FS_MAX_PERSONS`); values above `200` are automatically capped to `200` with a warning. |
 | `-m`, `--marriages` | Also fetch each fetched person's spouse(s) and couple-relationship details (marriage/divorce facts and notes). Off by default. |
-| `--no-sources` | Skip fetching each person's sources. Sources are fetched by default. |
-| `--no-notes` | Skip fetching person/couple notes. Notes are fetched by default. |
-| `--no-memories` | Skip fetching linked memories (photos/documents attached to a person). Memories are fetched by default. |
+| `--no-sources` | Skip fetching each person's sources. Sources are fetched by default. Can default from `FS_NO_SOURCES`; use `--no-no-sources` to force-enable sources when the env default disables them. |
+| `--no-notes` | Skip fetching person/couple notes. Notes are fetched by default. Can default from `FS_NO_NOTES`; use `--no-no-notes` to force-enable notes when the env default disables them. |
+| `--no-memories` | Skip fetching linked memories (photos/documents attached to a person). Memories are fetched by default. Can default from `FS_NO_MEMORIES`; use `--no-no-memories` to force-enable memories when the env default disables them. |
 | `--rate-limit N` | Maximum FamilySearch API requests per second. Default: `2` (or `FS_RATE_LIMIT`). |
 | `--timeout SECONDS` | Per-request HTTP timeout. Default: `60` (or `FS_TIMEOUT`). |
 | `-v`, `--verbose` | Print each HTTP request to stderr as it happens (via `logging` at debug level). Failures are always reported regardless of this flag. |

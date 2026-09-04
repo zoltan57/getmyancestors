@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,10 @@ FS_ENV_VARS = (
     "FS_TIMEOUT",
     "FS_ASCEND",
     "FS_DESCEND",
+    "FS_MAX_PERSONS",
+    "FS_NO_SOURCES",
+    "FS_NO_NOTES",
+    "FS_NO_MEMORIES",
 )
 
 
@@ -34,6 +39,7 @@ def test_env_vars_supply_defaults_for_fetch_options(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("FS_TIMEOUT", "30")
     monkeypatch.setenv("FS_ASCEND", "2")
     monkeypatch.setenv("FS_DESCEND", "1")
+    monkeypatch.setenv("FS_MAX_PERSONS", "180")
 
     parser = cli.build_parser()
     args = parser.parse_args(["fetch"])
@@ -45,6 +51,7 @@ def test_env_vars_supply_defaults_for_fetch_options(monkeypatch: pytest.MonkeyPa
     assert args.timeout == 30
     assert args.ascend == 2
     assert args.descend == 1
+    assert args.max_persons == 180
 
 
 def test_explicit_cli_flag_overrides_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -56,6 +63,41 @@ def test_explicit_cli_flag_overrides_env_var(monkeypatch: pytest.MonkeyPatch) ->
 
     assert args.db == "cli.sqlite"
     assert args.username == "cli-user"
+
+
+def test_max_persons_above_200_is_capped_and_warned(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="getmyancestors.cli"):
+        value = cli._cap_max_persons(250)
+
+    assert value == 200
+    assert "--max-persons 250 exceeds FamilySearch's documented maximum of 200; using 200 instead." in caplog.text
+
+
+def test_max_persons_below_200_is_honored_without_warning(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="getmyancestors.cli"):
+        value = cli._cap_max_persons(150)
+
+    assert value == 150
+    assert "--max-persons" not in caplog.text
+
+
+def test_fetch_optional_content_env_defaults_can_be_overridden_by_cli_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FS_NO_SOURCES", "1")
+    monkeypatch.setenv("FS_NO_NOTES", "true")
+    monkeypatch.setenv("FS_NO_MEMORIES", "yes")
+
+    parser = cli.build_parser()
+    default_args = parser.parse_args(["fetch"])
+    assert default_args.no_sources is True
+    assert default_args.no_notes is True
+    assert default_args.no_memories is True
+
+    override_args = parser.parse_args(["fetch", "--no-no-sources", "--no-no-notes", "--no-no-memories"])
+    assert override_args.no_sources is False
+    assert override_args.no_notes is False
+    assert override_args.no_memories is False
 
 
 def test_missing_db_without_env_returns_exit_code_2(capsys: pytest.CaptureFixture[str]) -> None:
