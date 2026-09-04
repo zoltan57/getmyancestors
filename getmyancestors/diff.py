@@ -48,18 +48,56 @@ def _run_people(conn: sqlite3.Connection, run_id: int) -> dict[str, str | None]:
 
 
 def _resolve_run_pair(conn: sqlite3.Connection) -> tuple[int, int]:
-    """Return the two most recent finished run IDs as (old, new)."""
+    """Return the two most recent finished runs with the same seed, else latest two."""
+    import json
+
     rows = conn.execute(
         """
-        SELECT run_id
+        SELECT run_id, cli_args
         FROM fetch_run
         WHERE finished_at IS NOT NULL
         ORDER BY run_id DESC
-        LIMIT 2
         """
     ).fetchall()
     if len(rows) < 2:
         raise ValueError("Need at least two finished runs for diff.")
+
+    def seed_from_cli_args(cli_args: str | None) -> tuple[str, ...]:
+        if not cli_args:
+            return ("__self__",)
+        try:
+            tokens = json.loads(cli_args)
+        except json.JSONDecodeError:
+            return ("__self__",)
+        if not isinstance(tokens, list):
+            return ("__self__",)
+        ids: list[str] = []
+        idx = 0
+        while idx < len(tokens):
+            token = tokens[idx]
+            if token not in ("-i", "--ids"):
+                idx += 1
+                continue
+            idx += 1
+            while idx < len(tokens):
+                value = tokens[idx]
+                if isinstance(value, str) and value.startswith("-"):
+                    break
+                ids.append(str(value))
+                idx += 1
+        if not ids:
+            return ("__self__",)
+        return tuple(sorted(set(ids)))
+
+    newest_run_by_seed: dict[tuple[str, ...], int] = {}
+    for row in rows:
+        run_id = int(row["run_id"])
+        seed = seed_from_cli_args(row["cli_args"])
+        newer_run = newest_run_by_seed.get(seed)
+        if newer_run is not None:
+            return run_id, newer_run
+        newest_run_by_seed[seed] = run_id
+
     return int(rows[1]["run_id"]), int(rows[0]["run_id"])
 
 
