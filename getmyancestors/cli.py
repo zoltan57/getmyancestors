@@ -11,6 +11,7 @@ from typing import Any
 
 from getmyancestors.db import connect, init_schema
 from getmyancestors.fetch import run_fetch
+from getmyancestors.load import load
 from getmyancestors.session import Session
 
 FID_PATTERN = re.compile(r"[A-Z0-9]{4}-[A-Z0-9]{2,4}")
@@ -77,6 +78,17 @@ def _run_fetch_command(args: argparse.Namespace, argv: list[str]) -> int:
         connection.close()
 
 
+def _run_load_command(args: argparse.Namespace) -> int:
+    """Execute the load subcommand."""
+    connection = connect(Path(args.db))
+    try:
+        init_schema(connection)
+        load(connection, args.run)
+        return 0
+    finally:
+        connection.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse CLI arguments and dispatch subcommands."""
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -87,8 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "fetch":
             return _run_fetch_command(args, ["getmyancestors", *argv])
         if args.command == "load":
-            print("load is not implemented yet", file=sys.stderr)
-            return 1
+            return _run_load_command(args)
         if args.command == "diff":
             print("diff is not implemented yet", file=sys.stderr)
             return 1
@@ -99,4 +110,3 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 1
-
