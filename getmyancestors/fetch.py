@@ -243,7 +243,15 @@ def run_fetch(conn: Any, session: Any, opts: Any) -> int:
                         continue
                     memory_ids.add(str(evidence_id).rsplit("-", 1)[0])
                 for memory_id in sorted(memory_ids):
-                    jobs.append(("memory", f"/platform/memories/memories/{memory_id}", memory_id))
+                    # subject_fid is the *owning person's* FID (consistent with
+                    # person_sources/person_notes), not the memory's own numeric
+                    # ID -- the memory ID is still recoverable from the URL/body
+                    # for anyone who needs it. Using the memory ID here was a
+                    # pre-existing bug: load.py's memory-loading step reads
+                    # subject_fid expecting the owning individual, which caused
+                    # bogus "individual" rows keyed by memory ID instead of a
+                    # real FamilySearch person ID.
+                    jobs.append(("memory", f"/platform/memories/memories/{memory_id}", fid))
 
         def worker(
             job: tuple[str, str, str | None],

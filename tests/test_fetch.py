@@ -152,6 +152,42 @@ def test_run_fetch_records_raw_bodies_and_expected_url_fanout(initialized_db, lo
         assert row["body"] == expected_raw_by_url[row["url"]]
 
 
+def test_run_fetch_memory_subject_fid_is_owning_person_not_memory_id(initialized_db, load_fixture) -> None:
+    """Regression test: a memory job's subject_fid must be the owning person's FID
+    (consistent with person_sources/person_notes), not the memory's own numeric ID.
+
+    Storing the memory ID there was a pre-existing bug: load.py's memory-loading
+    step reads subject_fid expecting the owning individual's FID, which caused
+    bogus "individual" rows keyed by a memory ID instead of a real FamilySearch
+    person ID, orphaning every captured memory from its actual owner.
+    """
+    current_user = load_fixture("current_user.json")
+    persons_batch = load_fixture("persons_batch.json")
+    memory = load_fixture("memory.json")
+
+    fixtures = {
+        "/platform/users/current": (current_user, '{"users":[{"personId":"AAAA-001"}]}', 200),
+        "/platform/tree/persons?pids=AAAA-001": (
+            persons_batch,
+            '{"persons":[{"id":"AAAA-001"},{"id":"BBBB-002"},{"id":"CCCC-003"}]}',
+            200,
+        ),
+        "/platform/tree/persons/*/sources": (None, None, 204),
+        "/platform/tree/persons/*/notes": (None, None, 204),
+        "/platform/memories/memories/MEM-9": (memory, '{"sourceDescriptions":[{"id":"MEM-9"}]}', 200),
+    }
+    session = FakeSession(fixtures)
+    opts = _make_opts(marriages=False)
+
+    run_fetch(initialized_db, session, opts)
+
+    row = initialized_db.execute(
+        "SELECT subject_fid FROM api_response WHERE kind = 'memory' AND url = ?",
+        ("/platform/memories/memories/MEM-9",),
+    ).fetchone()
+    assert row["subject_fid"] == "AAAA-001"
+
+
 def test_run_fetch_treats_204_no_content_as_success_not_failure(initialized_db, load_fixture) -> None:
     """Regression test: a 204 (e.g. a person with no sources) must not count as a
     failed request. get_url() returns data=None for a 204 by design (there is no
