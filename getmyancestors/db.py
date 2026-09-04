@@ -6,6 +6,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 SCHEMA_SQL = """
 -- ---- capture layer (append-only; source of truth) ----
@@ -30,6 +31,22 @@ CREATE TABLE IF NOT EXISTS api_response (
     body        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_api_response_run_kind ON api_response(run_id, kind);
+
+-- ---- append-only indexes for persons_batch payload members ----
+CREATE TABLE IF NOT EXISTS person_batch_member (
+    response_id INTEGER NOT NULL REFERENCES api_response(id),
+    fid         TEXT NOT NULL,
+    PRIMARY KEY (response_id, fid)
+);
+CREATE INDEX IF NOT EXISTS idx_person_batch_member_fid ON person_batch_member(fid);
+
+CREATE TABLE IF NOT EXISTS batch_relationship_member (
+    response_id INTEGER NOT NULL REFERENCES api_response(id),
+    rel_fid     TEXT NOT NULL,
+    PRIMARY KEY (response_id, rel_fid)
+);
+CREATE INDEX IF NOT EXISTS idx_batch_relationship_member_rel_fid
+    ON batch_relationship_member(rel_fid);
 
 -- ---- relational layer (derived; dropped and rebuilt by `load`) ----
 CREATE TABLE IF NOT EXISTS individual (
@@ -200,6 +217,73 @@ def latest_finished_run(conn: sqlite3.Connection) -> int | None:
     if row is None:
         return None
     return int(row["run_id"])
+
+
+def parse_json_body(body: str | None) -> dict[str, Any] | None:
+    """Parse one JSON body into a dictionary, returning None on invalid input."""
+    if not body:
+        return None
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def sync_batch_indexes(conn: sqlite3.Connection) -> None:
+    """Incrementally index persons_batch payload membership for future relational loads."""
+    rows = conn.execute(
+        """
+        SELECT id, body
+        FROM api_response
+        WHERE kind = 'persons_batch'
+          AND ok = 1
+          AND id NOT IN (SELECT DISTINCT response_id FROM person_batch_member)
+        ORDER BY id
+        """
+    ).fetchall()
+
+    with conn:
+        for row in rows:
+            response_id = int(row["id"])
+            payload = parse_json_body(row["body"])
+            if payload is None:
+                conn.execute(
+                    "INSERT OR IGNORE INTO person_batch_member (response_id, fid) VALUES (?, ?)",
+                    (response_id, ""),
+                )
+                continue
+
+            person_fids = {str(person.get("id")) for person in payload.get("persons", []) if person.get("id")}
+            relationship_fids = {
+                str(relation.get("id"))
+                for relation in payload.get("childAndParentsRelationships", [])
+                if relation.get("id")
+            }
+            relationship_fids.update(
+                str(relation.get("id"))
+                for relation in payload.get("relationships", [])
+                if relation.get("type") == "http://gedcomx.org/Couple" and relation.get("id")
+            )
+
+            if not person_fids and not relationship_fids:
+                # Sentinel marks this response as indexed so future syncs never reparse it.
+                conn.execute(
+                    "INSERT OR IGNORE INTO person_batch_member (response_id, fid) VALUES (?, ?)",
+                    (response_id, ""),
+                )
+                continue
+
+            conn.executemany(
+                "INSERT OR IGNORE INTO person_batch_member (response_id, fid) VALUES (?, ?)",
+                [(response_id, fid) for fid in sorted(person_fids)],
+            )
+            conn.executemany(
+                "INSERT OR IGNORE INTO batch_relationship_member (response_id, rel_fid) VALUES (?, ?)",
+                [(response_id, rel_fid) for rel_fid in sorted(relationship_fids)],
+            )
 
 
 def clear_relational(conn: sqlite3.Connection) -> None:

@@ -2,22 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from typing import Any
 
-
-def _parse_json(body: str | None) -> dict[str, Any] | None:
-    """Parse one JSON body into a dictionary, returning None on invalid input."""
-    if not body:
-        return None
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError:
-        return None
-    if isinstance(data, dict):
-        return data
-    return None
+from getmyancestors.db import parse_json_body
 
 
 def _display_name(person: dict[str, Any]) -> str | None:
@@ -48,7 +36,7 @@ def _run_people(conn: sqlite3.Connection, run_id: int) -> dict[str, str | None]:
         (run_id,),
     ).fetchall()
     for row in rows:
-        payload = _parse_json(row["body"])
+        payload = parse_json_body(row["body"])
         if payload is None:
             continue
         for person in payload.get("persons", []):

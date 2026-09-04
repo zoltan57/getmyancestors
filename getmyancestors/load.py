@@ -2,24 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from typing import Any
 
-from getmyancestors.db import clear_relational, latest_finished_run
-
-
-def _parse_json(body: str | None) -> dict[str, Any] | None:
-    """Parse a JSON object from text, returning None when unavailable or invalid."""
-    if not body:
-        return None
-    try:
-        parsed = json.loads(body)
-    except json.JSONDecodeError:
-        return None
-    if isinstance(parsed, dict):
-        return parsed
-    return None
+from getmyancestors.db import clear_relational, latest_finished_run, parse_json_body
 
 
 def _sex_from_gender_type(type_uri: str | None) -> str | None:
@@ -191,7 +177,7 @@ def load(conn: sqlite3.Connection, run_id: int | None = None) -> int:
 
     with conn:
         for row in person_batch_rows:
-            payload = _parse_json(row["body"])
+            payload = parse_json_body(row["body"])
             if payload is None:
                 continue
 
@@ -301,7 +287,7 @@ def load(conn: sqlite3.Connection, run_id: int | None = None) -> int:
             (run_id,),
         ).fetchall()
         for row in couple_rows:
-            payload = _parse_json(row["body"])
+            payload = parse_json_body(row["body"])
             if payload is None:
                 continue
             relationship = (payload.get("relationships") or [{}])[0]
@@ -365,7 +351,7 @@ def load(conn: sqlite3.Connection, run_id: int | None = None) -> int:
             (run_id,),
         ).fetchall()
         for row in person_source_rows:
-            payload = _parse_json(row["body"])
+            payload = parse_json_body(row["body"])
             if payload is None:
                 continue
 
@@ -423,7 +409,7 @@ def load(conn: sqlite3.Connection, run_id: int | None = None) -> int:
             (run_id,),
         ).fetchall()
         for row in person_note_rows:
-            payload = _parse_json(row["body"])
+            payload = parse_json_body(row["body"])
             if payload is None:
                 continue
             individual_fid = row["subject_fid"]
@@ -454,7 +440,7 @@ def load(conn: sqlite3.Connection, run_id: int | None = None) -> int:
             (run_id,),
         ).fetchall()
         for row in couple_note_rows:
-            payload = _parse_json(row["body"])
+            payload = parse_json_body(row["body"])
             if payload is None:
                 continue
             couple_fid = row["subject_fid"]
@@ -479,7 +465,7 @@ def load(conn: sqlite3.Connection, run_id: int | None = None) -> int:
             (run_id,),
         ).fetchall()
         for row in memory_rows:
-            payload = _parse_json(row["body"])
+            payload = parse_json_body(row["body"])
             if payload is None:
                 continue
             individual_fid = row["subject_fid"]
