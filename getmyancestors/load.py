@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from getmyancestors.db import clear_relational, latest_finished_run, parse_json_body
+from getmyancestors.db import clear_relational, latest_finished_run, parse_json_body, sync_batch_indexes
 
 
 def _sex_from_gender_type(type_uri: str | None) -> str | None:
@@ -111,7 +111,7 @@ def _upsert_individual(
     )
 
 
-def load(conn: sqlite3.Connection, run_id: int | None = None) -> int:
+def _load_single_run(conn: sqlite3.Connection, run_id: int | None = None) -> int:
     """Load relational tables from raw responses for one completed fetch run."""
     if run_id is None:
         run_id = latest_finished_run(conn)
@@ -515,3 +515,463 @@ def load(conn: sqlite3.Connection, run_id: int | None = None) -> int:
         print(f"{table}: {count}")
 
     return int(run_id)
+
+
+def _load_merged(conn: sqlite3.Connection) -> int:
+    """Load relational tables from latest-per-subject raw responses across finished runs."""
+    latest_run_id = latest_finished_run(conn)
+    if latest_run_id is None:
+        raise ValueError("No finished fetch runs available to load.")
+
+    sync_batch_indexes(conn)
+    clear_relational(conn)
+
+    family_pair_to_id: dict[tuple[str | None, str | None], int] = {}
+    couple_to_family_id: dict[str, int] = {}
+    payload_cache: dict[int, dict[str, Any] | None] = {}
+    response_run_id_cache: dict[int, int] = {}
+
+    def get_response_run_id(response_id: int) -> int:
+        if response_id in response_run_id_cache:
+            return response_run_id_cache[response_id]
+        row = conn.execute(
+            "SELECT run_id FROM api_response WHERE id = ?",
+            (response_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Response {response_id} not found.")
+        resolved_run_id = int(row["run_id"])
+        response_run_id_cache[response_id] = resolved_run_id
+        return resolved_run_id
+
+    def get_cached_payload(response_id: int) -> dict[str, Any] | None:
+        if response_id in payload_cache:
+            return payload_cache[response_id]
+        row = conn.execute(
+            "SELECT body FROM api_response WHERE id = ?",
+            (response_id,),
+        ).fetchone()
+        if row is None:
+            payload_cache[response_id] = None
+            return None
+        payload = parse_json_body(row["body"])
+        payload_cache[response_id] = payload
+        return payload
+
+    def get_or_create_family(
+        husband_fid: str | None,
+        wife_fid: str | None,
+        run_id: int,
+        couple_fid: str | None = None,
+    ) -> int:
+        key = (husband_fid, wife_fid)
+        if couple_fid and couple_fid in couple_to_family_id:
+            family_id = couple_to_family_id[couple_fid]
+            family_pair_to_id[key] = family_id
+            return family_id
+        if key in family_pair_to_id:
+            family_id = family_pair_to_id[key]
+            if couple_fid:
+                conn.execute(
+                    "UPDATE family SET couple_fid = COALESCE(couple_fid, ?) WHERE family_id = ?",
+                    (couple_fid, family_id),
+                )
+                couple_to_family_id[couple_fid] = family_id
+            return family_id
+
+        if husband_fid:
+            _ensure_individual(conn, husband_fid, run_id)
+        if wife_fid:
+            _ensure_individual(conn, wife_fid, run_id)
+
+        conn.execute(
+            "INSERT INTO family (couple_fid, husband_fid, wife_fid) VALUES (?, ?, ?)",
+            (couple_fid, husband_fid, wife_fid),
+        )
+        family_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+        family_pair_to_id[key] = family_id
+        if couple_fid:
+            couple_to_family_id[couple_fid] = family_id
+        return family_id
+
+    person_winner_rows = conn.execute(
+        """
+        SELECT pbm.fid, MAX(ar.id) AS winning_id
+        FROM person_batch_member pbm
+        JOIN api_response ar ON ar.id = pbm.response_id
+        JOIN fetch_run fr ON fr.run_id = ar.run_id
+        WHERE ar.kind = 'persons_batch' AND ar.ok = 1 AND fr.finished_at IS NOT NULL
+              AND pbm.fid != ''
+        GROUP BY pbm.fid
+        """
+    ).fetchall()
+    people_winners_by_response: dict[int, set[str]] = {}
+    for row in person_winner_rows:
+        winning_id = int(row["winning_id"])
+        people_winners_by_response.setdefault(winning_id, set()).add(str(row["fid"]))
+
+    relationship_winner_rows = conn.execute(
+        """
+        SELECT brm.rel_fid, MAX(ar.id) AS winning_id
+        FROM batch_relationship_member brm
+        JOIN api_response ar ON ar.id = brm.response_id
+        JOIN fetch_run fr ON fr.run_id = ar.run_id
+        WHERE ar.kind = 'persons_batch' AND ar.ok = 1 AND fr.finished_at IS NOT NULL
+        GROUP BY brm.rel_fid
+        """
+    ).fetchall()
+    relationship_winners_by_response: dict[int, set[str]] = {}
+    for row in relationship_winner_rows:
+        winning_id = int(row["winning_id"])
+        relationship_winners_by_response.setdefault(winning_id, set()).add(str(row["rel_fid"]))
+
+    def winning_rows_by_subject_kind(kind: str) -> list[sqlite3.Row]:
+        return conn.execute(
+            """
+            SELECT ar.run_id, ar.subject_fid, ar.body
+            FROM api_response ar
+            JOIN (
+                SELECT subject_fid, MAX(id) AS winning_id
+                FROM api_response ar2
+                JOIN fetch_run fr ON fr.run_id = ar2.run_id
+                WHERE ar2.kind = ? AND ar2.ok = 1 AND fr.finished_at IS NOT NULL
+                GROUP BY subject_fid
+            ) w ON w.winning_id = ar.id
+            ORDER BY ar.id
+            """,
+            (kind,),
+        ).fetchall()
+
+    memory_winner_rows = conn.execute(
+        """
+        SELECT ar.run_id, ar.subject_fid, ar.body
+        FROM api_response ar
+        JOIN (
+            SELECT subject_fid, url, MAX(id) AS winning_id
+            FROM api_response ar2
+            JOIN fetch_run fr ON fr.run_id = ar2.run_id
+            WHERE ar2.kind = 'memory' AND ar2.ok = 1 AND fr.finished_at IS NOT NULL
+            GROUP BY subject_fid, url
+        ) w ON w.winning_id = ar.id
+        ORDER BY ar.id
+        """
+    ).fetchall()
+
+    with conn:
+        for response_id, winner_fids in people_winners_by_response.items():
+            payload = get_cached_payload(response_id)
+            if payload is None:
+                continue
+            response_run_id = get_response_run_id(response_id)
+            places_by_id = {str(place.get("id")): place for place in payload.get("places", []) if place.get("id")}
+            for person in payload.get("persons", []):
+                fid = person.get("id")
+                if not fid or fid not in winner_fids:
+                    continue
+                _upsert_individual(conn, response_run_id, person)
+
+                for name in person.get("names", []):
+                    name_form = (name.get("nameForms") or [{}])[0]
+                    parts = name_form.get("parts") or []
+                    given, surname, prefix, suffix = _name_parts(parts)
+                    conn.execute(
+                        """
+                        INSERT INTO name (
+                            individual_fid, name_type, given, surname, prefix, suffix, full_text
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            fid,
+                            _name_type(name),
+                            given,
+                            surname,
+                            prefix,
+                            suffix,
+                            name_form.get("fullText"),
+                        ),
+                    )
+
+                for fact in person.get("facts", []):
+                    type_uri = fact.get("type")
+                    if not type_uri:
+                        continue
+                    if type_uri == "http://familysearch.org/v1/LifeSketch":
+                        conn.execute(
+                            "INSERT INTO note (individual_fid, subject, text) VALUES (?, ?, ?)",
+                            (fid, "Life Sketch", fact.get("value")),
+                        )
+                        continue
+
+                    place = fact.get("place", {})
+                    place_ref = str(place.get("description", "")).lstrip("#")
+                    place_row = places_by_id.get(place_ref, {})
+                    date = fact.get("date", {})
+                    conn.execute(
+                        """
+                        INSERT INTO event (
+                            individual_fid,
+                            family_id,
+                            type_uri,
+                            value,
+                            date_original,
+                            date_formal,
+                            place_original,
+                            place_latitude,
+                            place_longitude
+                        ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            fid,
+                            type_uri,
+                            fact.get("value"),
+                            date.get("original"),
+                            date.get("formal"),
+                            place.get("original"),
+                            place_row.get("latitude"),
+                            place_row.get("longitude"),
+                        ),
+                    )
+
+        for response_id, winner_rel_fids in relationship_winners_by_response.items():
+            payload = get_cached_payload(response_id)
+            if payload is None:
+                continue
+            response_run_id = get_response_run_id(response_id)
+
+            for relation in payload.get("childAndParentsRelationships", []):
+                rel_fid = relation.get("id")
+                if not rel_fid or rel_fid not in winner_rel_fids:
+                    continue
+                child_id = relation.get("child", {}).get("resourceId")
+                father_id = relation.get("parent1", {}).get("resourceId")
+                mother_id = relation.get("parent2", {}).get("resourceId")
+
+                family_id = get_or_create_family(father_id, mother_id, response_run_id)
+                if child_id:
+                    _ensure_individual(conn, child_id, response_run_id)
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO family_child (family_id, child_fid, rel_fid)
+                        VALUES (?, ?, ?)
+                        """,
+                        (family_id, child_id, rel_fid),
+                    )
+
+            for relation in payload.get("relationships", []):
+                rel_fid = relation.get("id")
+                if not rel_fid or rel_fid not in winner_rel_fids:
+                    continue
+                if relation.get("type") != "http://gedcomx.org/Couple":
+                    continue
+                husband = relation.get("person1", {}).get("resourceId")
+                wife = relation.get("person2", {}).get("resourceId")
+                if not husband and not wife:
+                    continue
+                get_or_create_family(husband, wife, response_run_id, rel_fid)
+
+        couple_rows = winning_rows_by_subject_kind("couple")
+        for row in couple_rows:
+            payload = parse_json_body(row["body"])
+            if payload is None:
+                continue
+            relationship = (payload.get("relationships") or [{}])[0]
+            couple_fid = relationship.get("id") or row["subject_fid"]
+            family_id = get_or_create_family(None, None, int(row["run_id"]), couple_fid)
+
+            for fact in relationship.get("facts", []):
+                type_uri = fact.get("type")
+                if not type_uri:
+                    continue
+                date = fact.get("date", {})
+                place = fact.get("place", {})
+                conn.execute(
+                    """
+                    INSERT INTO event (
+                        individual_fid,
+                        family_id,
+                        type_uri,
+                        value,
+                        date_original,
+                        date_formal,
+                        place_original,
+                        place_latitude,
+                        place_longitude
+                    ) VALUES (NULL, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                    """,
+                    (
+                        family_id,
+                        type_uri,
+                        fact.get("value"),
+                        date.get("original"),
+                        date.get("formal"),
+                        place.get("original"),
+                    ),
+                )
+
+            for source_link in relationship.get("sources", []):
+                source_fid = source_link.get("descriptionId")
+                if not source_fid:
+                    continue
+                conn.execute(
+                    "INSERT INTO source (fid) VALUES (?) ON CONFLICT(fid) DO NOTHING",
+                    (source_fid,),
+                )
+                change_message = source_link.get("attribution", {}).get("changeMessage")
+                conn.execute(
+                    """
+                    INSERT INTO source_link (source_fid, individual_fid, family_id, change_message)
+                    VALUES (?, NULL, ?, ?)
+                    """,
+                    (source_fid, family_id, change_message),
+                )
+
+        person_source_rows = winning_rows_by_subject_kind("person_sources")
+        for row in person_source_rows:
+            payload = parse_json_body(row["body"])
+            if payload is None:
+                continue
+            response_run_id = int(row["run_id"])
+
+            for source_description in payload.get("sourceDescriptions", []):
+                source_fid = source_description.get("id")
+                if not source_fid:
+                    continue
+                title = ((source_description.get("titles") or [{}])[0]).get("value")
+                citation = ((source_description.get("citations") or [{}])[0]).get("value")
+                conn.execute(
+                    """
+                    INSERT INTO source (fid, title, citation, url)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(fid) DO UPDATE SET
+                        title = excluded.title,
+                        citation = excluded.citation,
+                        url = excluded.url
+                    """,
+                    (source_fid, title, citation, source_description.get("about")),
+                )
+
+            individual_fid = row["subject_fid"]
+            if not individual_fid:
+                persons = payload.get("persons", [])
+                if persons:
+                    individual_fid = persons[0].get("id")
+            if not individual_fid:
+                continue
+            _ensure_individual(conn, individual_fid, response_run_id)
+            person_sources = ((payload.get("persons") or [{}])[0]).get("sources", [])
+            for source_link in person_sources:
+                source_fid = source_link.get("descriptionId")
+                if not source_fid:
+                    continue
+                conn.execute(
+                    "INSERT INTO source (fid) VALUES (?) ON CONFLICT(fid) DO NOTHING",
+                    (source_fid,),
+                )
+                change_message = source_link.get("attribution", {}).get("changeMessage")
+                conn.execute(
+                    """
+                    INSERT INTO source_link (source_fid, individual_fid, family_id, change_message)
+                    VALUES (?, ?, NULL, ?)
+                    """,
+                    (source_fid, individual_fid, change_message),
+                )
+
+        person_note_rows = winning_rows_by_subject_kind("person_notes")
+        for row in person_note_rows:
+            payload = parse_json_body(row["body"])
+            if payload is None:
+                continue
+            response_run_id = int(row["run_id"])
+            individual_fid = row["subject_fid"]
+            if not individual_fid:
+                persons = payload.get("persons", [])
+                if persons:
+                    individual_fid = persons[0].get("id")
+            if not individual_fid:
+                continue
+            _ensure_individual(conn, individual_fid, response_run_id)
+            notes = ((payload.get("persons") or [{}])[0]).get("notes", [])
+            for note in notes:
+                conn.execute(
+                    """
+                    INSERT INTO note (individual_fid, family_id, subject, text)
+                    VALUES (?, NULL, ?, ?)
+                    """,
+                    (individual_fid, note.get("subject"), note.get("text")),
+                )
+
+        couple_note_rows = winning_rows_by_subject_kind("couple_notes")
+        for row in couple_note_rows:
+            payload = parse_json_body(row["body"])
+            if payload is None:
+                continue
+            couple_fid = row["subject_fid"]
+            family_id = get_or_create_family(None, None, int(row["run_id"]), couple_fid)
+            notes = payload.get("notes", [])
+            for note in notes:
+                conn.execute(
+                    """
+                    INSERT INTO note (individual_fid, family_id, subject, text)
+                    VALUES (NULL, ?, ?, ?)
+                    """,
+                    (family_id, note.get("subject"), note.get("text")),
+                )
+
+        for row in memory_winner_rows:
+            payload = parse_json_body(row["body"])
+            if payload is None:
+                continue
+            individual_fid = row["subject_fid"]
+            if not individual_fid:
+                continue
+            _ensure_individual(conn, individual_fid, int(row["run_id"]))
+
+            for source_description in payload.get("sourceDescriptions", []):
+                title = ((source_description.get("titles") or [{}])[0]).get("value")
+                description = ((source_description.get("descriptions") or [{}])[0]).get("value")
+                if title and description:
+                    combined_description = f"{title}\n{description}"
+                else:
+                    combined_description = title or description
+                conn.execute(
+                    """
+                    INSERT INTO memory (
+                        individual_fid,
+                        memory_fid,
+                        url,
+                        description,
+                        media_type
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        individual_fid,
+                        source_description.get("id"),
+                        source_description.get("about"),
+                        combined_description,
+                        source_description.get("mediaType"),
+                    ),
+                )
+
+    row_count_tables = [
+        "individual",
+        "name",
+        "family",
+        "family_child",
+        "event",
+        "source",
+        "source_link",
+        "note",
+        "memory",
+    ]
+    for table in row_count_tables:
+        count = conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()["c"]
+        print(f"{table}: {count}")
+
+    return int(latest_run_id)
+
+
+def load(conn: sqlite3.Connection, run_id: int | None = None) -> int:
+    """Load relational tables from raw responses."""
+    if run_id is None:
+        return _load_merged(conn)
+    return _load_single_run(conn, run_id)

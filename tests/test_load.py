@@ -33,6 +33,23 @@ def _table_count(conn, table: str) -> int:
     return int(conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()["c"])
 
 
+def _person(fid: str, name: str, *, living: bool = False, gender_type: str | None = None) -> dict:
+    person: dict[str, object] = {
+        "id": fid,
+        "living": living,
+        "names": [
+            {
+                "preferred": True,
+                "nameForms": [{"fullText": name, "parts": []}],
+            }
+        ],
+        "facts": [],
+    }
+    if gender_type is not None:
+        person["gender"] = {"type": gender_type}
+    return person
+
+
 def test_load_builds_relational_tables_from_raw_fixtures(initialized_db, load_fixture) -> None:
     conn = initialized_db
     run_id = start_run(conn, ["getmyancestors", "fetch", "--db", "tmp.sqlite"])
@@ -93,7 +110,7 @@ def test_load_builds_relational_tables_from_raw_fixtures(initialized_db, load_fi
         url="/platform/memories/memories/MEM-9",
     )
 
-    load(conn, None)
+    load(conn, run_id)
 
     individuals = {
         row["fid"]: row
@@ -221,3 +238,212 @@ def test_load_creates_stub_individual_for_unfetched_parent(initialized_db, load_
     assert stub["sex"] is None
     assert stub["living"] is None
     assert stub["display_name"] is None
+
+
+def test_load_merged_keeps_people_from_non_overlapping_finished_runs(initialized_db) -> None:
+    conn = initialized_db
+    old_run = start_run(conn, ["getmyancestors", "fetch", "-i", "AAAA-001"])
+    finish_run(conn, old_run, total=1, failed=0)
+    new_run = start_run(conn, ["getmyancestors", "fetch", "-i", "BBBB-002"])
+    finish_run(conn, new_run, total=1, failed=0)
+
+    old_batch = {
+        "persons": [
+            _person("AAAA-001", "Old Line Person", gender_type="http://gedcomx.org/Male"),
+        ]
+    }
+    old_batch["persons"][0]["facts"] = [
+        {
+            "type": "http://gedcomx.org/Birth",
+            "date": {"formal": "+1900-01-01"},
+        }
+    ]
+    new_batch = {
+        "persons": [
+            _person("BBBB-002", "New Line Person", gender_type="http://gedcomx.org/Female"),
+        ]
+    }
+    new_batch["persons"][0]["facts"] = [
+        {
+            "type": "http://gedcomx.org/Birth",
+            "date": {"formal": "+1910-02-02"},
+        }
+    ]
+
+    _insert_api_response(conn, old_run, kind="persons_batch", body=old_batch)
+    _insert_api_response(conn, new_run, kind="persons_batch", body=new_batch)
+
+    load(conn)
+
+    individuals = conn.execute("SELECT fid, display_name FROM individual ORDER BY fid").fetchall()
+    assert [(row["fid"], row["display_name"]) for row in individuals] == [
+        ("AAAA-001", "Old Line Person"),
+        ("BBBB-002", "New Line Person"),
+    ]
+    events = conn.execute("SELECT individual_fid, date_formal FROM event ORDER BY individual_fid").fetchall()
+    assert [(row["individual_fid"], row["date_formal"]) for row in events] == [
+        ("AAAA-001", "+1900-01-01"),
+        ("BBBB-002", "+1910-02-02"),
+    ]
+
+
+def test_load_merged_uses_latest_capture_for_refetched_person(initialized_db) -> None:
+    conn = initialized_db
+    older_run = start_run(conn, ["getmyancestors", "fetch", "-i", "AAAA-001"])
+    finish_run(conn, older_run, total=1, failed=0)
+    newer_run = start_run(conn, ["getmyancestors", "fetch", "-i", "AAAA-001"])
+    finish_run(conn, newer_run, total=1, failed=0)
+
+    _insert_api_response(
+        conn,
+        older_run,
+        kind="persons_batch",
+        body={"persons": [_person("AAAA-001", "Original Name")]},
+    )
+    _insert_api_response(
+        conn,
+        newer_run,
+        kind="persons_batch",
+        body={"persons": [_person("AAAA-001", "Updated Name")]},
+    )
+
+    load(conn)
+
+    row = conn.execute("SELECT display_name FROM individual WHERE fid = 'AAAA-001'").fetchone()
+    assert row is not None
+    assert row["display_name"] == "Updated Name"
+    names = conn.execute("SELECT full_text FROM name WHERE individual_fid = 'AAAA-001'").fetchall()
+    assert [name["full_text"] for name in names] == ["Updated Name"]
+
+
+def test_load_merged_keeps_older_person_when_later_runs_do_not_refetch(initialized_db) -> None:
+    conn = initialized_db
+    first_run = start_run(conn, ["getmyancestors", "fetch", "-i", "AAAA-001"])
+    finish_run(conn, first_run, total=1, failed=0)
+    second_run = start_run(conn, ["getmyancestors", "fetch", "-i", "BBBB-002"])
+    finish_run(conn, second_run, total=1, failed=0)
+
+    _insert_api_response(
+        conn,
+        first_run,
+        kind="persons_batch",
+        body={"persons": [_person("AAAA-001", "Persisting Person")]},
+    )
+    _insert_api_response(
+        conn,
+        second_run,
+        kind="persons_batch",
+        body={"persons": [_person("BBBB-002", "Later Person")]},
+    )
+
+    load(conn)
+
+    people = conn.execute("SELECT fid, display_name FROM individual ORDER BY fid").fetchall()
+    assert [(row["fid"], row["display_name"]) for row in people] == [
+        ("AAAA-001", "Persisting Person"),
+        ("BBBB-002", "Later Person"),
+    ]
+
+
+def test_load_merged_keeps_relationship_when_later_person_winner_omits_it(initialized_db) -> None:
+    conn = initialized_db
+    early_run = start_run(conn, ["getmyancestors", "fetch", "-i", "CHILD-001"])
+    finish_run(conn, early_run, total=1, failed=0)
+    later_run = start_run(conn, ["getmyancestors", "fetch", "-i", "CHILD-001"])
+    finish_run(conn, later_run, total=1, failed=0)
+
+    _insert_api_response(
+        conn,
+        early_run,
+        kind="persons_batch",
+        body={
+            "persons": [
+                _person("CHILD-001", "Child Early"),
+            ],
+            "childAndParentsRelationships": [
+                {
+                    "id": "REL-CP-1",
+                    "parent1": {"resourceId": "FATHER-001"},
+                    "parent2": {"resourceId": "MOTHER-001"},
+                    "child": {"resourceId": "CHILD-001"},
+                }
+            ],
+        },
+    )
+    _insert_api_response(
+        conn,
+        later_run,
+        kind="persons_batch",
+        body={
+            "persons": [
+                _person("CHILD-001", "Child Later"),
+            ],
+        },
+    )
+
+    load(conn)
+
+    family_child = conn.execute("SELECT family_id, child_fid, rel_fid FROM family_child").fetchone()
+    assert family_child is not None
+    assert family_child["child_fid"] == "CHILD-001"
+    assert family_child["rel_fid"] == "REL-CP-1"
+    family = conn.execute(
+        "SELECT family_id, husband_fid, wife_fid FROM family WHERE family_id = ?",
+        (family_child["family_id"],),
+    ).fetchone()
+    assert family is not None
+    assert family["husband_fid"] == "FATHER-001"
+    assert family["wife_fid"] == "MOTHER-001"
+
+
+def test_load_merged_keeps_multiple_memories_for_same_person_across_runs(initialized_db) -> None:
+    conn = initialized_db
+    first_run = start_run(conn, ["getmyancestors", "fetch", "-i", "AAAA-001"])
+    finish_run(conn, first_run, total=1, failed=0)
+    second_run = start_run(conn, ["getmyancestors", "fetch", "-i", "AAAA-001"])
+    finish_run(conn, second_run, total=1, failed=0)
+
+    _insert_api_response(
+        conn,
+        first_run,
+        kind="memory",
+        subject_fid="AAAA-001",
+        url="/platform/memories/memories/MEM-1",
+        body={
+            "sourceDescriptions": [
+                {
+                    "id": "MEM-1",
+                    "about": "https://www.familysearch.org/photos/artifacts/1",
+                    "mediaType": "image/jpeg",
+                    "titles": [{"value": "First"}],
+                }
+            ]
+        },
+    )
+    _insert_api_response(
+        conn,
+        second_run,
+        kind="memory",
+        subject_fid="AAAA-001",
+        url="/platform/memories/memories/MEM-2",
+        body={
+            "sourceDescriptions": [
+                {
+                    "id": "MEM-2",
+                    "about": "https://www.familysearch.org/photos/artifacts/2",
+                    "mediaType": "image/jpeg",
+                    "titles": [{"value": "Second"}],
+                }
+            ]
+        },
+    )
+
+    load(conn)
+
+    memories = conn.execute(
+        "SELECT individual_fid, memory_fid, url FROM memory WHERE individual_fid = 'AAAA-001' ORDER BY memory_fid"
+    ).fetchall()
+    assert [(row["individual_fid"], row["memory_fid"], row["url"]) for row in memories] == [
+        ("AAAA-001", "MEM-1", "https://www.familysearch.org/photos/artifacts/1"),
+        ("AAAA-001", "MEM-2", "https://www.familysearch.org/photos/artifacts/2"),
+    ]
