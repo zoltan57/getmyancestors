@@ -2,6 +2,28 @@
 
 `getmyancestors` is a command-line tool for capturing FamilySearch tree data as raw JSON and loading that capture into relational SQLite tables for downstream transcription workflows.
 
+## About this fork
+
+This is a fork of [Linekio/getmyancestors](https://github.com/Linekio/getmyancestors), repurposed to a different form and purpose:
+
+- **Original project:** a Tkinter GUI (`fstogedcom`) plus a CLI, both of which log into FamilySearch and export a family tree directly to a GEDCOM file, with a separate tool for merging multiple GEDCOM files together.
+- **This fork:** a CLI-only tool that captures raw FamilySearch API responses into a SQLite database as the source of truth, then derives relational tables and run-to-run diffs from that capture — it no longer produces GEDCOM output at all.
+
+Removed from the original:
+
+- The Tkinter GUI (`fstogedcom`)
+- GEDCOM file generation/export
+- The GEDCOM merge tool
+
+Added in this fork:
+
+- `fetch`/`load`/`diff` CLI subcommands backed by a capture-then-derive SQLite pipeline
+- Raw JSON capture (`api_response`) as the source of truth, with relational tables rebuilt from it on demand via `load`
+- A `diff` command comparing two captured runs (appeared/disappeared FIDs, display-name changes)
+- `.env`-based configuration and a `logging`-based diagnostics/verbose/logfile system (see [Logging](#logging) below)
+
+If you're looking for the original GEDCOM/GUI tool, use the upstream repository linked above instead.
+
 ## Design rule
 
 Raw capture rows in `api_response` are the source of truth. Relational tables are a derived view that can be dropped and rebuilt by running `load` again, without re-fetching.
