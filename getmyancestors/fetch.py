@@ -105,7 +105,12 @@ def run_fetch(conn: Any, session: Any, opts: Any) -> int:
         http_status: int | None,
     ) -> None:
         nonlocal requests_total, requests_failed
-        ok = 1 if data is not None else 0
+        # A 204 No Content is a legitimate, successful "this resource has no
+        # data" result (e.g. a person with no sources/notes) -- get_url()
+        # returns data=None for it by design, since there's no JSON body to
+        # parse, but that must not be counted the same as a genuine failure
+        # (timeout, 404, 500, etc, which also return data=None).
+        ok = 1 if (data is not None or http_status == 204) else 0
         if not ok:
             requests_failed += 1
         requests_total += 1

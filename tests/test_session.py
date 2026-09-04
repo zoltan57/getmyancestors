@@ -156,20 +156,114 @@ def test_get_url_401_triggers_one_relogin_then_retry(
             DummyResponse(status_code=200, text='{"users": []}', json_data={"users": []}),
         ]
     )
-    login_calls = {"count": 0}
+    login_calls: list[bool] = []
 
-    def fake_login() -> None:
-        login_calls["count"] += 1
+    def fake_login(*, refresh_only: bool = False) -> None:
+        login_calls.append(refresh_only)
 
     monkeypatch.setattr(session, "get", lambda *args, **kwargs: next(responses))
     monkeypatch.setattr(session, "login", fake_login)
 
     data, raw_text, status = session.get_url("/platform/users/current")
 
-    assert login_calls["count"] == 1
+    assert login_calls == [True]
     assert data == {"users": []}
     assert raw_text == '{"users": []}'
     assert status == 200
+
+
+def test_login_refresh_only_skips_set_current(
+    session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test: a 401-triggered re-login must not re-fetch the current user.
+
+    Before this fix, ``login()`` unconditionally called ``set_current()`` (which
+    calls ``get_url()``) after every successful login, and ``get_url()`` called
+    ``login()`` again on any 401. A persistently-401ing endpoint (e.g. if
+    ``/platform/users/current`` itself always returned 401) caused unbounded
+    mutual recursion between the two methods instead of a clean, bounded failure.
+    """
+    session = session_factory()
+    set_current_calls = {"count": 0}
+
+    def fake_set_current() -> None:
+        set_current_calls["count"] += 1
+
+    def fake_get(url: str, **kwargs: Any) -> DummyResponse:
+        if "auth/familysearch/login" in url:
+            session.cookies.set("XSRF-TOKEN", "xsrf")
+            session.cookies.set("fssessionid", "cookie")
+            return DummyResponse(status_code=200, text="ok", url=url)
+        if "oauth2/v3/authorization" in url:
+            return DummyResponse(
+                status_code=200, text="ok", url="https://ident.familysearch.org/callback?code=AUTHCODE"
+            )
+        raise AssertionError(f"Unexpected GET URL: {url}")
+
+    def fake_post(url: str, **kwargs: Any) -> DummyResponse:
+        if url.endswith("/login"):
+            return DummyResponse(status_code=200, text="ok", url=url)
+        if url.endswith("/token"):
+            return DummyResponse(status_code=200, json_data={"access_token": "token"}, url=url)
+        raise AssertionError(f"Unexpected POST URL: {url}")
+
+    monkeypatch.setattr(session, "get", fake_get)
+    monkeypatch.setattr(session, "post", fake_post)
+    monkeypatch.setattr(session, "set_current", fake_set_current)
+
+    session.login(refresh_only=True)
+    assert session.logged
+    assert set_current_calls["count"] == 0
+
+    session.login()
+    assert set_current_calls["count"] == 1
+
+
+def test_get_url_persistent_401_does_not_recurse_forever(
+    session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for the same recursion bug, exercised through get_url().
+
+    Simulates an endpoint (e.g. ``/platform/users/current``) that always
+    returns 401 while re-login always otherwise succeeds: this must terminate
+    via get_url's own bounded retry loop rather than recursing without limit.
+    """
+    session = session_factory()
+    login_flow_calls = {"count": 0}
+
+    def fake_get(url: str, **kwargs: Any) -> DummyResponse:
+        if "auth/familysearch/login" in url:
+            session.cookies.set("XSRF-TOKEN", "xsrf")
+            session.cookies.set("fssessionid", "cookie")
+            login_flow_calls["count"] += 1
+            return DummyResponse(status_code=200, text="ok", url=url)
+        if "oauth2/v3/authorization" in url:
+            return DummyResponse(
+                status_code=200, text="ok", url="https://ident.familysearch.org/callback?code=AUTHCODE"
+            )
+        if "api.familysearch.org" in url:
+            return DummyResponse(status_code=401, text="unauthorized", url=url)
+        raise AssertionError(f"Unexpected GET URL: {url}")
+
+    def fake_post(url: str, **kwargs: Any) -> DummyResponse:
+        if url.endswith("/login"):
+            return DummyResponse(status_code=200, text="ok", url=url)
+        if url.endswith("/token"):
+            return DummyResponse(status_code=200, json_data={"access_token": "token"}, url=url)
+        raise AssertionError(f"Unexpected POST URL: {url}")
+
+    monkeypatch.setattr(session, "get", fake_get)
+    monkeypatch.setattr(session, "post", fake_post)
+
+    data, raw_text, status = session.get_url("/platform/users/current")
+
+    assert (data, raw_text, status) == (None, None, 401)
+    assert session.failed_requests == 1
+    assert session.logged
+    # get_url retries a bounded number of times (its own attempt cap), each
+    # triggering exactly one refresh-only re-login -- proving this terminates
+    # instead of recursing without limit.
+    assert 1 <= login_flow_calls["count"] <= 10
 
 
 def test_get_url_debug_message_requires_debug_caplog_level(

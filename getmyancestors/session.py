@@ -59,8 +59,17 @@ class Session(requests.Session):
         """Return whether the session cookie indicates a logged-in user."""
         return bool(self.cookies.get("fssessionid"))
 
-    def login(self) -> None:
-        """Run the FamilySearch OAuth login sequence."""
+    def login(self, *, refresh_only: bool = False) -> None:
+        """Run the FamilySearch OAuth login sequence.
+
+        ``refresh_only=True`` is used when ``get_url`` calls back into this
+        method to re-establish an expired session mid-request (on a 401): it
+        skips the post-login ``set_current()`` call, which itself calls
+        ``get_url`` — without this, a persistently-401ing endpoint (e.g. if
+        ``/platform/users/current`` itself keeps returning 401) would cause
+        unbounded mutual recursion between ``login`` and ``get_url`` instead
+        of failing cleanly once ``get_url``'s own retry limit is reached.
+        """
         for attempt in range(5):
             try:
                 url = "https://www.familysearch.org/auth/familysearch/login"
@@ -129,7 +138,7 @@ class Session(requests.Session):
                 if "access_token" not in data:
                     logger.warning(res.text)
                     continue
-                self.headers.update({"Authorization": "******"})
+                self.headers.update({"Authorization": f"Bearer {data['access_token']}"})
 
             except requests.exceptions.ReadTimeout:
                 logger.warning("Read timed out")
@@ -151,7 +160,8 @@ class Session(requests.Session):
                 time.sleep(min(2**attempt, 60))
                 continue
             if self.logged:
-                self.set_current()
+                if not refresh_only:
+                    self.set_current()
                 break
         if not self.logged:
             logger.warning("Login failed after retries; session cookie was not established.")
@@ -196,7 +206,7 @@ class Session(requests.Session):
                 time.sleep(min(2**attempt, 60))
                 continue
             if response.status_code == 401:
-                self.login()
+                self.login(refresh_only=True)
                 continue
 
             try:

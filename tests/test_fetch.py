@@ -152,6 +152,51 @@ def test_run_fetch_records_raw_bodies_and_expected_url_fanout(initialized_db, lo
         assert row["body"] == expected_raw_by_url[row["url"]]
 
 
+def test_run_fetch_treats_204_no_content_as_success_not_failure(initialized_db, load_fixture) -> None:
+    """Regression test: a 204 (e.g. a person with no sources) must not count as a
+    failed request. get_url() returns data=None for a 204 by design (there is no
+    JSON body to parse), but that must not be conflated with a genuine failure.
+    """
+    current_user = load_fixture("current_user.json")
+    persons_batch = load_fixture("persons_batch.json")
+    person_notes = load_fixture("person_notes.json")
+    couple = load_fixture("couple.json")
+    memory = load_fixture("memory.json")
+
+    fixtures = {
+        "/platform/users/current": (current_user, '{"users":[{"personId":"AAAA-001"}]}', 200),
+        "/platform/tree/persons?pids=AAAA-001": (
+            persons_batch,
+            '{"persons":[{"id":"AAAA-001"},{"id":"BBBB-002"},{"id":"CCCC-003"}]}',
+            200,
+        ),
+        "/platform/tree/couple-relationships/REL-C-1": (couple, '{"relationships":[{"id":"REL-C-1"}]}', 200),
+        "/platform/tree/couple-relationships/REL-C-1/notes": (person_notes, '{"persons":[{"id":"AAAA-001"}]}', 200),
+        # Every person's /sources returns 204 No Content -- a legitimate empty result.
+        "/platform/tree/persons/*/sources": (None, None, 204),
+        "/platform/tree/persons/*/notes": (person_notes, '{"persons":[{"id":"AAAA-001"}]}', 200),
+        "/platform/memories/memories/MEM-9": (memory, '{"sourceDescriptions":[{"id":"MEM-9"}]}', 200),
+    }
+    session = FakeSession(fixtures)
+    opts = _make_opts()
+
+    exit_code = run_fetch(initialized_db, session, opts)
+
+    assert exit_code == 0
+    run_row = initialized_db.execute("SELECT requests_failed FROM fetch_run ORDER BY run_id DESC LIMIT 1").fetchone()
+    assert run_row["requests_failed"] == 0
+
+    source_rows = initialized_db.execute(
+        "SELECT subject_fid, http_status, ok, body FROM api_response WHERE url LIKE '%/sources' ORDER BY id"
+    ).fetchall()
+    assert len(source_rows) == 3
+    for row in source_rows:
+        assert row["http_status"] == 204
+        assert row["ok"] == 1
+        assert row["body"] is None
+        assert row["subject_fid"] is not None
+
+
 def test_run_fetch_records_failed_response_and_returns_3(initialized_db, load_fixture) -> None:
     current_user = load_fixture("current_user.json")
     persons_batch = load_fixture("persons_batch.json")
