@@ -14,6 +14,31 @@ From the repository root:
 uv sync --locked
 ```
 
+## Configuration (.env)
+
+Every `--db`/`-u`/`-p` flag (plus a few `fetch` tuning options) can be supplied via
+environment variables instead of the command line — useful for repeated or scripted
+runs. Copy [`.env.example`](.env.example) to `.env` in the repository root and fill
+in values; `.env` is loaded automatically and is already gitignored, so real
+credentials never get committed. A CLI flag always overrides the matching
+environment variable.
+
+| Environment variable | Equivalent flag | Applies to |
+| --- | --- | --- |
+| `FS_USERNAME` | `-u`/`--username` | `fetch` |
+| `FS_PASSWORD` | `-p`/`--password` | `fetch` |
+| `FS_DB` | `--db` | `fetch`, `load`, `diff` |
+| `FS_RATE_LIMIT` | `--rate-limit` | `fetch` |
+| `FS_TIMEOUT` | `--timeout` | `fetch` |
+| `FS_ASCEND` | `-a`/`--ascend` | `fetch` |
+| `FS_DESCEND` | `-d`/`--descend` | `fetch` |
+
+`--db` and `-u`/`--username` are the only values that must come from *somewhere*
+(flag or environment variable) — omitting both is a bad-argument error (exit code
+`2`). If `-p`/`--password` is not supplied either way, you're prompted via `getpass`
+instead, which is the more secure option since it never touches shell history or a
+plaintext file.
+
 ## Commands
 
 All commands require `--db` and use the same SQLite file.
@@ -28,18 +53,18 @@ getmyancestors fetch --db family.sqlite -u USERNAME -i AAAA-001 -a 4 -d 1 -m -v
 
 | Flag | Meaning |
 | --- | --- |
-| `--db PATH` | Path to the SQLite capture database (required; created if it doesn't exist). |
-| `-u`, `--username USERNAME` | FamilySearch.org username (required). |
-| `-p`, `--password PASSWORD` | FamilySearch.org password. Omit it to be prompted instead (recommended — an argument value can leak into shell history/process listings). |
+| `--db PATH` | Path to the SQLite capture database (created if it doesn't exist). Required via flag or `FS_DB`. |
+| `-u`, `--username USERNAME` | FamilySearch.org username. Required via flag or `FS_USERNAME`. |
+| `-p`, `--password PASSWORD` | FamilySearch.org password. Falls back to `FS_PASSWORD`, then prompts if still unset (prompting is recommended — a flag value can leak into shell history/process listings). |
 | `-i`, `--ids FID [FID ...]` | One or more starting FamilySearch person IDs (format `AAAA-001`). Default: the logged-in user's own person ID. |
-| `-a`, `--ascend N` | Number of ancestor generations to walk upward from the starting person(s). Default: `4`. |
-| `-d`, `--descend N` | Number of descendant generations to walk downward from the starting person(s). Default: `0`. |
+| `-a`, `--ascend N` | Number of ancestor generations to walk upward from the starting person(s). Default: `4` (or `FS_ASCEND`). |
+| `-d`, `--descend N` | Number of descendant generations to walk downward from the starting person(s). Default: `0` (or `FS_DESCEND`). |
 | `-m`, `--marriages` | Also fetch each fetched person's spouse(s) and couple-relationship details (marriage/divorce facts and notes). Off by default. |
 | `--no-sources` | Skip fetching each person's sources. Sources are fetched by default. |
 | `--no-notes` | Skip fetching person/couple notes. Notes are fetched by default. |
 | `--no-memories` | Skip fetching linked memories (photos/documents attached to a person). Memories are fetched by default. |
-| `--rate-limit N` | Maximum FamilySearch API requests per second. Default: `2`. |
-| `--timeout SECONDS` | Per-request HTTP timeout. Default: `60`. |
+| `--rate-limit N` | Maximum FamilySearch API requests per second. Default: `2` (or `FS_RATE_LIMIT`). |
+| `--timeout SECONDS` | Per-request HTTP timeout. Default: `60` (or `FS_TIMEOUT`). |
 | `-v`, `--verbose` | Print each HTTP request to stderr as it happens. Failures are always reported regardless of this flag. |
 
 Run `getmyancestors fetch --help` (or `load --help` / `diff --help`) for the same descriptions from the CLI itself.

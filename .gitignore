@@ -139,6 +139,7 @@ dump.rdb
 !.readthedocs.yml
 !.github/
 !.github/**
+!.env.example
 
 # vscode
 .vscode/
