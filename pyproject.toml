@@ -46,4 +46,4 @@ dev = [
 HomePage = "https://github.com/Linekio/getmyancestors"
 
 [project.scripts]
-getmyancestors = "getmyancestors.getmyancestors:main"
+getmyancestors = "getmyancestors.cli:main"

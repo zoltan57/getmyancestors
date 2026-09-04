@@ -1,0 +1,77 @@
+{
+  "persons": [
+    {
+      "id": "AAAA-001",
+      "living": false,
+      "gender": {"type": "http://gedcomx.org/Male"},
+      "names": [
+        {
+          "preferred": true,
+          "type": "http://gedcomx.org/BirthName",
+          "nameForms": [{
+            "fullText": "Johann Schmidt",
+            "parts": [
+              {"type": "http://gedcomx.org/Given", "value": "Johann"},
+              {"type": "http://gedcomx.org/Surname", "value": "Schmidt"}
+            ]
+          }],
+          "attribution": {"changeMessage": "imported"}
+        },
+        {
+          "preferred": false,
+          "type": "http://gedcomx.org/AlsoKnownAs",
+          "nameForms": [{"fullText": "John Smith", "parts": [
+            {"type": "http://gedcomx.org/Given", "value": "John"},
+            {"type": "http://gedcomx.org/Surname", "value": "Smith"}
+          ]}]
+        }
+      ],
+      "facts": [
+        {
+          "type": "http://gedcomx.org/Birth",
+          "date": {"original": "12 March 1850", "formal": "+1850-03-12"},
+          "place": {"original": "Hamburg, Germany", "description": "#PLACE-1"},
+          "attribution": {"changeMessage": "from church record"}
+        },
+        {"type": "http://gedcomx.org/Occupation", "value": "Carpenter"}
+      ],
+      "evidence": [{"id": "MEM-9-ABC"}]
+    },
+    {
+      "id": "BBBB-002",
+      "living": false,
+      "gender": {"type": "http://gedcomx.org/Female"},
+      "names": [{"preferred": true, "nameForms": [{"fullText": "Anna Meyer", "parts": [
+        {"type": "http://gedcomx.org/Given", "value": "Anna"},
+        {"type": "http://gedcomx.org/Surname", "value": "Meyer"}
+      ]}]}],
+      "facts": [{"type": "http://gedcomx.org/Death", "date": {"original": "1901"}}]
+    },
+    {
+      "id": "CCCC-003",
+      "living": true,
+      "names": [{"preferred": true, "nameForms": [{"fullText": "Karl Schmidt", "parts": [
+        {"type": "http://gedcomx.org/Given", "value": "Karl"},
+        {"type": "http://gedcomx.org/Surname", "value": "Schmidt"}
+      ]}]}],
+      "facts": []
+    }
+  ],
+  "places": [{"id": "PLACE-1", "latitude": 53.55, "longitude": 9.99}],
+  "childAndParentsRelationships": [
+    {
+      "id": "REL-CP-1",
+      "parent1": {"resourceId": "AAAA-001"},
+      "parent2": {"resourceId": "BBBB-002"},
+      "child": {"resourceId": "CCCC-003"}
+    }
+  ],
+  "relationships": [
+    {
+      "id": "REL-C-1",
+      "type": "http://gedcomx.org/Couple",
+      "person1": {"resourceId": "AAAA-001"},
+      "person2": {"resourceId": "BBBB-002"}
+    }
+  ]
+}

@@ -7,6 +7,7 @@ running the real FamilySearch login flow in tests.
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 from pathlib import Path
 
 import pytest
@@ -56,3 +57,19 @@ def initialized_db(temp_db_path: Path):
         yield conn
     finally:
         conn.close()
+
+
+@pytest.fixture
+def fixtures_dir() -> Path:
+    """Return the test fixture directory path."""
+    return Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture
+def load_fixture(fixtures_dir: Path) -> Callable[[str], dict]:
+    """Load one JSON fixture by filename."""
+
+    def _load(name: str) -> dict:
+        return json.loads((fixtures_dir / name).read_text(encoding="utf-8"))
+
+    return _load

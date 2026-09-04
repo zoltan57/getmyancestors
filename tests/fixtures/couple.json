@@ -1,0 +1,8 @@
+{"relationships": [{
+  "id": "REL-C-1",
+  "facts": [{"type": "http://gedcomx.org/Marriage",
+             "date": {"original": "3 June 1872", "formal": "+1872-06-03"},
+             "place": {"original": "Hamburg"}}],
+  "sources": [{"descriptionId": "SRC-1",
+               "attribution": {"changeMessage": "marriage register"}}]
+}]}

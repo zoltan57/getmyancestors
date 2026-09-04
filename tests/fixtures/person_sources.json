@@ -1,0 +1,12 @@
+{
+  "persons": [{"id": "AAAA-001", "sources": [
+    {"descriptionId": "SRC-1", "attribution": {"changeMessage": "1850 baptism register, p. 14"}},
+    {"descriptionId": "SRC-2"}
+  ]}],
+  "sourceDescriptions": [
+    {"id": "SRC-1", "about": "https://familysearch.org/ark:/61903/1:1:XXXX",
+     "titles": [{"value": "Hamburg Baptisms 1850"}],
+     "citations": [{"value": "Ev. Kirche Hamburg, Taufen 1850, Nr. 112"}]},
+    {"id": "SRC-2", "titles": [{"value": "Family bible"}]}
+  ]
+}

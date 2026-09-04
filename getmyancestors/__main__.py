@@ -1,5 +1,5 @@
 def main() -> int:
-    from getmyancestors.getmyancestors import main as cli_main
+    from getmyancestors.cli import main as cli_main
 
     return cli_main()
 
