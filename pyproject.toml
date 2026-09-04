@@ -23,8 +23,6 @@ classifiers = [
 # with `uv lock --upgrade` (fake-useragent exists to avoid FamilySearch
 # blocking — retest downloads after upgrading it).
 dependencies = [
-    "babelfish>=0.6.1",
-    "diskcache>=5.6.3",
     "requests>=2.32.3",
     "fake-useragent>=2.0.3",
     # Deliberate exact pin: the LimiterAdapter mounted in classes/session.py
@@ -42,10 +40,5 @@ readme = {file = ["README.md"], content-type = "text/markdown"}
 [project.urls]
 HomePage = "https://github.com/Linekio/getmyancestors"
 
-[tool.setuptools.package-data]
-getmyancestors = ["fstogedcom.png"]
-
 [project.scripts]
 getmyancestors = "getmyancestors.getmyancestors:main"
-mergemyancestors = "getmyancestors.mergemyancestors:main"
-fstogedcom = "getmyancestors.fstogedcom:main"

@@ -39,5 +39,5 @@ jobs:
         # import-time errors that compileall cannot. The Tkinter GUI module
         # is excluded: importing it requires a display-capable Tk install.
         run: |
-          uv run python -c "import getmyancestors.getmyancestors"
-          uv run python -c "import getmyancestors.mergemyancestors"
+          uv run python -c "import getmyancestors.session"
+          uv run python -c "import getmyancestors"

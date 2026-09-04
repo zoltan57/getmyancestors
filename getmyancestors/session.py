@@ -9,9 +9,6 @@ from fake_useragent import UserAgent
 
 from requests_ratelimiter import LimiterAdapter
 
-# local imports
-from getmyancestors.classes.translation import translations
-
 DEFAULT_CLIENT_ID = "a02j000000KTRjpAAH"
 DEFAULT_REDIRECT_URI = "https://misbach.github.io/fs-auth/index_raw.html"
 
@@ -231,11 +228,3 @@ class Session(requests.Session):
             self.fid = data["users"][0]["personId"]
             self.lang = data["users"][0]["preferredLanguage"]
             self.display_name = data["users"][0]["displayName"]
-
-    def _(self, string):
-        """translate a string into user's language
-        TODO replace translation file for gettext format
-        """
-        if string in translations and self.lang in translations[string]:
-            return translations[string][self.lang]
-        return string
