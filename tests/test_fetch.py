@@ -80,12 +80,32 @@ def test_run_fetch_records_raw_bodies_and_expected_url_fanout(initialized_db, lo
     memory = load_fixture("memory.json")
 
     fixtures = {
-        "/platform/users/current": (current_user, '{"users":[{"personId":"AAAA-001","preferredLanguage":"en","displayName":"Test User"}]}', 200),
-        "/platform/tree/persons?pids=AAAA-001": (persons_batch, '{"persons":[{"id":"AAAA-001"},{"id":"BBBB-002"},{"id":"CCCC-003"}]}', 200),
+        "/platform/users/current": (
+            current_user,
+            '{"users":[{"personId":"AAAA-001","preferredLanguage":"en","displayName":"Test User"}]}',
+            200,
+        ),
+        "/platform/tree/persons?pids=AAAA-001": (
+            persons_batch,
+            '{"persons":[{"id":"AAAA-001"},{"id":"BBBB-002"},{"id":"CCCC-003"}]}',
+            200,
+        ),
         "/platform/tree/couple-relationships/REL-C-1": (couple, '{"relationships":[{"id":"REL-C-1"}]}', 200),
-        "/platform/tree/couple-relationships/REL-C-1/notes": (person_notes, '{"persons":[{"id":"AAAA-001","notes":[{"subject":"Emigration","text":"Left Hamburg for New York in 1869."}]}]}', 200),
-        "/platform/tree/persons/*/sources": (person_sources, '{"persons":[{"id":"AAAA-001","sources":[{"descriptionId":"SRC-1"},{"descriptionId":"SRC-2"}]}]}', 200),
-        "/platform/tree/persons/*/notes": (person_notes, '{"persons":[{"id":"AAAA-001","notes":[{"subject":"Emigration","text":"Left Hamburg for New York in 1869."}]}]}', 200),
+        "/platform/tree/couple-relationships/REL-C-1/notes": (
+            person_notes,
+            '{"persons":[{"id":"AAAA-001","notes":[{"subject":"Emigration","text":"Left Hamburg for New York in 1869."}]}]}',
+            200,
+        ),
+        "/platform/tree/persons/*/sources": (
+            person_sources,
+            '{"persons":[{"id":"AAAA-001","sources":[{"descriptionId":"SRC-1"},{"descriptionId":"SRC-2"}]}]}',
+            200,
+        ),
+        "/platform/tree/persons/*/notes": (
+            person_notes,
+            '{"persons":[{"id":"AAAA-001","notes":[{"subject":"Emigration","text":"Left Hamburg for New York in 1869."}]}]}',
+            200,
+        ),
         "/platform/memories/memories/MEM-9": (memory, '{"sourceDescriptions":[{"id":"MEM-9"}]}', 200),
     }
     session = FakeSession(fixtures)
@@ -112,9 +132,7 @@ def test_run_fetch_records_raw_bodies_and_expected_url_fanout(initialized_db, lo
     ]
     assert memory_calls == ["/platform/memories/memories/MEM-9"]
 
-    rows = initialized_db.execute(
-        "SELECT kind, url, ok, body FROM api_response ORDER BY id"
-    ).fetchall()
+    rows = initialized_db.execute("SELECT kind, url, ok, body FROM api_response ORDER BY id").fetchall()
     assert all(row["ok"] == 1 for row in rows)
     expected_raw_by_url = {
         "/platform/users/current": '{"users":[{"personId":"AAAA-001","preferredLanguage":"en","displayName":"Test User"}]}',
@@ -143,7 +161,11 @@ def test_run_fetch_records_failed_response_and_returns_3(initialized_db, load_fi
 
     fixtures = {
         "/platform/users/current": (current_user, '{"users":[{"personId":"AAAA-001"}]}', 200),
-        "/platform/tree/persons?pids=AAAA-001": (persons_batch, '{"persons":[{"id":"AAAA-001"},{"id":"BBBB-002"},{"id":"CCCC-003"}]}', 200),
+        "/platform/tree/persons?pids=AAAA-001": (
+            persons_batch,
+            '{"persons":[{"id":"AAAA-001"},{"id":"BBBB-002"},{"id":"CCCC-003"}]}',
+            200,
+        ),
         "/platform/tree/couple-relationships/REL-C-1": (couple, '{"relationships":[{"id":"REL-C-1"}]}', 200),
         "/platform/tree/couple-relationships/REL-C-1/notes": (person_notes, '{"persons":[{"id":"AAAA-001"}]}', 200),
         "/platform/tree/persons/*/sources": (person_sources, '{"persons":[{"id":"AAAA-001"}]}', 200),

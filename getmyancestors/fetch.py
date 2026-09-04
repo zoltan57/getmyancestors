@@ -127,7 +127,7 @@ def run_fetch(conn: Any, session: Any, opts: Any) -> int:
     ) -> dict[str, Any] | None:
         try:
             data, raw_text, http_status = session.get_url(url, headers=headers)
-        except Exception:
+        except Exception:  # noqa: BLE001 - one bad request must be recorded, not crash the run (plan §6.7)
             data, raw_text, http_status = None, None, None
         record_response(kind, url, subject_fid, data, raw_text, http_status)
         return data
@@ -229,12 +229,12 @@ def run_fetch(conn: Any, session: Any, opts: Any) -> int:
                     jobs.append(("memory", f"/platform/memories/memories/{memory_id}", memory_id))
 
         def worker(
-            job: tuple[str, str, str | None]
+            job: tuple[str, str, str | None],
         ) -> tuple[str, str, str | None, dict[str, Any] | None, str | None, int | None]:
             kind, url, subject = job
             try:
                 data, raw_text, http_status = session.get_url(url)
-            except Exception:
+            except Exception:  # noqa: BLE001 - one worker's exception must not crash the whole run (plan §6.7)
                 data, raw_text, http_status = None, None, None
             return kind, url, subject, data, raw_text, http_status
 

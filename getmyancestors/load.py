@@ -195,11 +195,7 @@ def load(conn: sqlite3.Connection, run_id: int | None = None) -> int:
             if payload is None:
                 continue
 
-            places_by_id = {
-                str(place.get("id")): place
-                for place in payload.get("places", [])
-                if place.get("id")
-            }
+            places_by_id = {str(place.get("id")): place for place in payload.get("places", []) if place.get("id")}
 
             for person in payload.get("persons", []):
                 _upsert_individual(conn, run_id, person)

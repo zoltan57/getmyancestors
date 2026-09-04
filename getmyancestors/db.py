@@ -142,7 +142,10 @@ def start_run(conn: sqlite3.Connection, argv: list[str]) -> int:
         INSERT INTO fetch_run (started_at, cli_args, requests_total, requests_failed)
         VALUES (?, ?, 0, 0)
         """,
-        (_utc_now_iso(), json.dumps(argv),),
+        (
+            _utc_now_iso(),
+            json.dumps(argv),
+        ),
     )
     conn.commit()
     return int(cursor.lastrowid)

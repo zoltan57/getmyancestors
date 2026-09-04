@@ -72,9 +72,7 @@ def test_missing_username_for_fetch_without_env_returns_exit_code_2(
     assert "FS_USERNAME" in capsys.readouterr().err
 
 
-def test_env_var_supplies_db_for_load_command(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_env_var_supplies_db_for_load_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     db_path = tmp_path / "env-load.sqlite"
     connection = connect(db_path)
     init_schema(connection)

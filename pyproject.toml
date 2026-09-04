@@ -41,6 +41,7 @@ readme = {file = ["README.md"], content-type = "text/markdown"}
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "ruff>=0.16.6",
 ]
 
 [tool.uv]
@@ -51,6 +52,26 @@ dev = [
 # pyproject.toml and uv.lock are actually in sync. Bump deliberately
 # together with the CI pin and `uv lock --upgrade`.
 required-version = "==0.12.9"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+# Explicit selection rather than relying on ruff's own defaults, which have
+# changed across versions (see docs/decisions/2026-09-04-technical-stack.md).
+# E/W/F: pycodestyle + pyflakes baseline. I: import sorting. UP: modern
+# 3.12 syntax. B: flake8-bugbear common bug patterns. C4: comprehension
+# simplifications. BLE: flags blind `except Exception`; the few
+# intentional ones (worker/top-level error boundaries) are annotated with
+# `# noqa: BLE001` at the call site rather than disabled project-wide.
+# RUF: ruff-specific checks.
+select = ["E", "W", "F", "I", "UP", "B", "C4", "BLE", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Fixture literals pair a URL with its exact raw JSON body; wrapping them
+# would hurt readability more than the line length helps.
+"tests/test_fetch.py" = ["E501"]
 
 [project.urls]
 HomePage = "https://github.com/Linekio/getmyancestors"

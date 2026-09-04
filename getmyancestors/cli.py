@@ -59,8 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_parser.add_argument(
         "--db",
         default=_env_str("FS_DB"),
-        help="path to the SQLite capture database (created if missing); "
-        "falls back to the FS_DB environment variable",
+        help="path to the SQLite capture database (created if missing); falls back to the FS_DB environment variable",
     )
     fetch_parser.add_argument(
         "-u",
@@ -80,8 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--ids",
         nargs="+",
         type=_fid,
-        help="one or more starting FamilySearch person IDs, e.g. AAAA-001; "
-        "default: the logged-in user's own person ID",
+        help="one or more starting FamilySearch person IDs, e.g. AAAA-001; default: the logged-in user's own person ID",
     )
     fetch_parser.add_argument(
         "-a",
@@ -125,8 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout",
         type=int,
         default=_env_int("FS_TIMEOUT", 60),
-        help="per-request HTTP timeout in seconds; "
-        "falls back to the FS_TIMEOUT environment variable (default: 60)",
+        help="per-request HTTP timeout in seconds; falls back to the FS_TIMEOUT environment variable (default: 60)",
     )
     fetch_parser.add_argument(
         "-v", "--verbose", action="store_true", help="print each HTTP request to stderr as it happens"
@@ -140,9 +137,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=_env_str("FS_DB"),
         help="path to the SQLite capture database; falls back to the FS_DB environment variable",
     )
-    load_parser.add_argument(
-        "--run", type=int, help="run ID to load; default: the most recently finished fetch run"
-    )
+    load_parser.add_argument("--run", type=int, help="run ID to load; default: the most recently finished fetch run")
 
     diff_parser = subparsers.add_parser(
         "diff", help="report person IDs that appeared/disappeared between two fetch runs (no network access)"
@@ -250,6 +245,6 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except SystemExit:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - top-level boundary: report and exit 1 rather than a traceback
         print(str(exc), file=sys.stderr)
         return 1

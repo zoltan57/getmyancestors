@@ -97,9 +97,7 @@ def test_load_builds_relational_tables_from_raw_fixtures(initialized_db, load_fi
 
     individuals = {
         row["fid"]: row
-        for row in conn.execute(
-            "SELECT fid, sex, living, display_name FROM individual ORDER BY fid"
-        ).fetchall()
+        for row in conn.execute("SELECT fid, sex, living, display_name FROM individual ORDER BY fid").fetchall()
     }
     assert set(individuals) == {"AAAA-001", "BBBB-002", "CCCC-003"}
     assert individuals["AAAA-001"]["sex"] == "M"
@@ -112,20 +110,14 @@ def test_load_builds_relational_tables_from_raw_fixtures(initialized_db, load_fi
     assert individuals["CCCC-003"]["living"] == 1
     assert individuals["CCCC-003"]["display_name"] == "Karl Schmidt"
 
-    names = conn.execute(
-        "SELECT individual_fid, name_type, full_text FROM name ORDER BY individual_fid, id"
-    ).fetchall()
+    names = conn.execute("SELECT individual_fid, name_type, full_text FROM name ORDER BY individual_fid, id").fetchall()
     assert len(names) == 4
     assert any(
-        row["individual_fid"] == "AAAA-001"
-        and row["name_type"] == "aka"
-        and row["full_text"] == "John Smith"
+        row["individual_fid"] == "AAAA-001" and row["name_type"] == "aka" and row["full_text"] == "John Smith"
         for row in names
     )
 
-    family = conn.execute(
-        "SELECT family_id, couple_fid, husband_fid, wife_fid FROM family"
-    ).fetchone()
+    family = conn.execute("SELECT family_id, couple_fid, husband_fid, wife_fid FROM family").fetchone()
     assert family is not None
     assert family["couple_fid"] == "REL-C-1"
     assert family["husband_fid"] == "AAAA-001"
@@ -197,10 +189,7 @@ def test_load_builds_relational_tables_from_raw_fixtures(initialized_db, load_fi
 
     load(conn, run_id)
 
-    rerun_counts = {
-        table: _table_count(conn, table)
-        for table in baseline_counts
-    }
+    rerun_counts = {table: _table_count(conn, table) for table in baseline_counts}
     assert rerun_counts == baseline_counts
 
 

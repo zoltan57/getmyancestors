@@ -21,9 +21,7 @@ def test_schema_initializes_on_tmp_db(temp_db_path: Path) -> None:
     conn = connect(temp_db_path)
     try:
         init_schema(conn)
-        row = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='fetch_run'"
-        ).fetchone()
+        row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='fetch_run'").fetchone()
         assert row is not None
     finally:
         conn.close()

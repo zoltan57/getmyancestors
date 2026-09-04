@@ -196,7 +196,7 @@ class Session(requests.Session):
                 continue
 
             last_status = response.status_code
-            self.write_log("Status code: %s" % response.status_code)
+            self.write_log(f"Status code: {response.status_code}")
             if response.status_code == 204:
                 return None, None, response.status_code
             if response.status_code in {404, 405, 410}:
@@ -229,16 +229,13 @@ class Session(requests.Session):
             try:
                 return response.json(), raw_text, response.status_code
             except ValueError as error:
-                self.write_log("WARNING: corrupted file from %s, error: %s" % (url, error))
+                self.write_log(f"WARNING: corrupted file from {url}, error: {error}")
                 return None, raw_text, response.status_code
 
         self.failed_requests += 1
-        warning = (
-            f"WARNING: max retries exceeded for {url} "
-            f"(failed_requests={self.failed_requests})\n"
-        )
+        warning = f"WARNING: max retries exceeded for {url} (failed_requests={self.failed_requests})\n"
         sys.stderr.write(warning)
-        self.write_log("WARNING: max retries exceeded for %s" % url)
+        self.write_log(f"WARNING: max retries exceeded for {url}")
         return None, None, last_status
 
     def set_current(self) -> None:

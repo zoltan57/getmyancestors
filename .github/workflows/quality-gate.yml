@@ -2,9 +2,9 @@ name: Quality Gate
 
 # Minimal gate for what this repository can currently verify: the locked
 # dependency set installs, every module byte-compiles, the entry-point
-# modules import cleanly, and the pytest suite passes. The project has no
-# lint or type-check tooling configured yet (no ruff/mypy config) — add
-# those steps here as that tooling lands, rather than assuming it.
+# modules import cleanly, Ruff lint/format checks pass, and the pytest
+# suite passes. Type-checking (e.g. ty) is not yet configured — add that
+# step here as it lands, rather than assuming it.
 
 on:
   push:
@@ -50,6 +50,14 @@ jobs:
         run: |
           uv run python -c "import getmyancestors.cli"
           uv run python -c "import getmyancestors.fetch"
+
+      - name: Lint and format check (Ruff)
+        # Rule selection lives in pyproject.toml's [tool.ruff.lint] (explicit,
+        # not ruff's own defaults -- see docs/decisions/2026-09-04-technical-stack.md).
+        # --check fails without modifying files, matching a CI gate's read-only intent.
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
 
       - name: Run tests
         run: uv run pytest -q
