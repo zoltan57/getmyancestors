@@ -81,6 +81,29 @@ def test_max_persons_below_200_is_honored_without_warning(caplog: pytest.LogCapt
     assert "--max-persons" not in caplog.text
 
 
+def test_max_persons_default_over_200_does_not_warn_until_actually_used(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Building the parser (computing the --max-persons default) must never warn by
+    itself -- an over-200 FS_MAX_PERSONS default that gets overridden by an in-range
+    --max-persons flag should never be capped-and-warned about, since it's unused."""
+    monkeypatch.setenv("FS_MAX_PERSONS", "300")
+
+    with caplog.at_level(logging.WARNING, logger="getmyancestors.cli"):
+        parser = cli.build_parser()
+        overridden_args = parser.parse_args(["fetch", "--max-persons", "50"])
+
+    assert overridden_args.max_persons == 50
+    assert "--max-persons" not in caplog.text
+
+    default_args = parser.parse_args(["fetch"])
+    assert default_args.max_persons == 300  # uncapped until _run_fetch_command resolves it
+    with caplog.at_level(logging.WARNING, logger="getmyancestors.cli"):
+        default_args.max_persons = cli._cap_max_persons(int(default_args.max_persons))
+    assert default_args.max_persons == 200
+    assert "--max-persons 300 exceeds FamilySearch's documented maximum of 200; using 200 instead." in caplog.text
+
+
 def test_fetch_optional_content_env_defaults_can_be_overridden_by_cli_flags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

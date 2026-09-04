@@ -100,3 +100,27 @@ def test_diff_default_falls_back_to_two_most_recent_overall_when_no_seed_pair(in
     diff(conn)
     output = capsys.readouterr().out
     assert f"Comparing runs {middle_run} -> {newest_run}" in output
+
+
+def test_diff_default_prefers_seed_group_of_the_overall_newest_run(initialized_db, capsys) -> None:
+    """A seed-group that completes its own pair earlier while scanning newest-first
+    must not win over the seed-group containing the single most recent run overall."""
+    conn = initialized_db
+    run1 = start_run(conn, ["getmyancestors", "fetch", "-i", "AAAA-001"])
+    finish_run(conn, run1, total=1, failed=0)
+    run2 = start_run(conn, ["getmyancestors", "fetch", "-i", "BBBB-002"])
+    finish_run(conn, run2, total=1, failed=0)
+    run3 = start_run(conn, ["getmyancestors", "fetch", "-i", "AAAA-001"])
+    finish_run(conn, run3, total=1, failed=0)
+    run4 = start_run(conn, ["getmyancestors", "fetch", "-i", "AAAA-001"])
+    finish_run(conn, run4, total=1, failed=0)
+    run5 = start_run(conn, ["getmyancestors", "fetch", "-i", "BBBB-002"])
+    finish_run(conn, run5, total=1, failed=0)
+
+    diff(conn)
+    output = capsys.readouterr().out
+    # run5 (seed BBBB-002) is the overall newest run; its own seed-group's most
+    # recent predecessor is run2, so the pair must be (run2, run5) -- not
+    # (run3, run4), which is an older, unrelated seed-group that happens to
+    # complete its pair first when scanning newest-first.
+    assert f"Comparing runs {run2} -> {run5}" in output

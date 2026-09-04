@@ -122,7 +122,12 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_parser.add_argument(
         "--max-persons",
         type=int,
-        default=_cap_max_persons(_env_int("FS_MAX_PERSONS", 200)),
+        # Not capped here: capping (and its warning) is deferred to
+        # _run_fetch_command, after argument parsing has resolved whether this
+        # default is even used and logging has been configured -- otherwise an
+        # over-200 FS_MAX_PERSONS would warn even when an in-range --max-persons
+        # flag overrides it, and the warning would bypass the configured log file.
+        default=_env_int("FS_MAX_PERSONS", 200),
         help="maximum person IDs per /platform/tree/persons batch request; "
         "falls back to the FS_MAX_PERSONS environment variable (default: 200)",
     )

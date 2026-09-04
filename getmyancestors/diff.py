@@ -89,14 +89,28 @@ def _resolve_run_pair(conn: sqlite3.Connection) -> tuple[int, int]:
             return ("__self__",)
         return tuple(sorted(set(ids)))
 
-    newest_run_by_seed: dict[tuple[str, ...], int] = {}
+    # rows is newest-first, so each seed's run list stays sorted newest-first too.
+    run_ids_by_seed: dict[tuple[str, ...], list[int]] = {}
     for row in rows:
         run_id = int(row["run_id"])
         seed = seed_from_cli_args(row["cli_args"])
-        newer_run = newest_run_by_seed.get(seed)
-        if newer_run is not None:
-            return run_id, newer_run
-        newest_run_by_seed[seed] = run_id
+        run_ids_by_seed.setdefault(seed, []).append(run_id)
+
+    # Among seed-groups with 2+ runs, prefer the one whose own newest run is the
+    # most recent overall -- not an arbitrary older seed-group that happens to
+    # complete its own pair first when scanning newest-first.
+    best_pair: tuple[int, int] | None = None
+    best_recency = -1
+    for run_ids in run_ids_by_seed.values():
+        if len(run_ids) < 2:
+            continue
+        newest, second_newest = run_ids[0], run_ids[1]
+        if newest > best_recency:
+            best_recency = newest
+            best_pair = (second_newest, newest)
+
+    if best_pair is not None:
+        return best_pair
 
     return int(rows[1]["run_id"]), int(rows[0]["run_id"])
 
