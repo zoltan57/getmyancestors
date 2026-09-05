@@ -38,6 +38,14 @@ dynamic = ["version", "readme"]
 version = {attr = "getmyancestors.__version__"}
 readme = {file = ["README.md"], content-type = "text/markdown"}
 
+[tool.setuptools.packages.find]
+# Without this, setuptools' automatic flat-layout discovery finds `data/`
+# (tracked only via data/.gitkeep, per README) as a second top-level package
+# alongside `getmyancestors/` and refuses to build at all
+# ("Multiple top-level packages discovered in a flat-layout"). Restrict
+# discovery to the actual package explicitly instead of guessing.
+include = ["getmyancestors*"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
