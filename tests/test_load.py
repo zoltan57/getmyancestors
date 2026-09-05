@@ -240,6 +240,43 @@ def test_load_creates_stub_individual_for_unfetched_parent(initialized_db, load_
     assert stub["display_name"] is None
 
 
+def test_load_assigns_husband_wife_by_gender_when_parent1_is_the_mother(initialized_db) -> None:
+    conn = initialized_db
+    run_id = start_run(conn, ["getmyancestors", "fetch", "--db", "tmp.sqlite"])
+    finish_run(conn, run_id, total=1, failed=0)
+
+    # GedcomX's parent1/parent2 are gender-neutral positional slots -- here parent1
+    # is deliberately the mother, to verify husband/wife are assigned by recorded
+    # gender.type rather than by blindly trusting parent1->husband.
+    _insert_api_response(
+        conn,
+        run_id,
+        kind="persons_batch",
+        body={
+            "persons": [
+                _person("MOTHER-001", "Mother First", gender_type="http://gedcomx.org/Female"),
+                _person("FATHER-001", "Father Second", gender_type="http://gedcomx.org/Male"),
+                _person("CHILD-001", "Child"),
+            ],
+            "childAndParentsRelationships": [
+                {
+                    "id": "REL-CP-1",
+                    "parent1": {"resourceId": "MOTHER-001"},
+                    "parent2": {"resourceId": "FATHER-001"},
+                    "child": {"resourceId": "CHILD-001"},
+                }
+            ],
+        },
+    )
+
+    load(conn, run_id)
+
+    family = conn.execute("SELECT husband_fid, wife_fid FROM family").fetchone()
+    assert family is not None
+    assert family["husband_fid"] == "FATHER-001"
+    assert family["wife_fid"] == "MOTHER-001"
+
+
 def test_load_merged_keeps_people_from_non_overlapping_finished_runs(initialized_db) -> None:
     conn = initialized_db
     old_run = start_run(conn, ["getmyancestors", "fetch", "-i", "AAAA-001"])
